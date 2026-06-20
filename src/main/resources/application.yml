@@ -63,6 +63,13 @@ app:
       geofence-events: geofence-events
       delivery-alerts: delivery-alerts
       dead-letter-events: dead-letter-events
+  simulation:
+    enabled: true
+    driver-count: 50
+    publish-interval-ms: 2000
+    center-lat: 43.6045
+    center-lng: 1.4440
+    spawn-radius-km: 5
 
 server:
   port: 8080

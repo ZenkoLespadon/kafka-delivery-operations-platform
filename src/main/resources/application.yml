@@ -9,16 +9,15 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate
-    open-in-view: false
-    properties:
-      hibernate:
-        format_sql: true
-        jdbc:
-          time_zone: UTC
+      ddl-auto: update
 
   kafka:
     bootstrap-servers: localhost:9092
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
     consumer:
       group-id: delivery-backend
       auto-offset-reset: earliest
@@ -26,11 +25,7 @@ spring:
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: com.github.zenkolespadon.delivery.*
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      retries: 3
+        spring.json.value.default.type: com.github.zenkolespadon.delivery.event.GpsEvent
 
   data:
     redis:
@@ -57,6 +52,17 @@ management:
     health:
       probes:
         enabled: true
+
+app:
+  kafka:
+    topics:
+      gps-events: gps-events
+      delivery-events: delivery-events
+      driver-events: driver-events
+      eta-updated: eta-updated
+      geofence-events: geofence-events
+      delivery-alerts: delivery-alerts
+      dead-letter-events: dead-letter-events
 
 server:
   port: 8080

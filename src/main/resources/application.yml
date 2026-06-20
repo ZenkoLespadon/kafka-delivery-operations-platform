@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: kafka-delivery-backend
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/delivery_ops
+    username: delivery
+    password: delivery
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: delivery-backend
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.github.zenkolespadon.delivery.*
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+delivery:
+  kafka:
+    topics:
+      gps-events: gps-events
+      delivery-events: delivery-events
+      driver-events: driver-events
+      eta-updated: eta-updated
+      geofence-events: geofence-events
+      delivery-alerts: delivery-alerts
+      dead-letter-events: dead-letter-events
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+server:
+  port: 8080

@@ -13,7 +13,7 @@ public class HealthController {
     Map<String, Object> health() {
         return Map.of(
                 "status", "UP",
-                "service", "kafka-delivery-backend",
+                "service", "delivery-backend",
                 "timestamp", Instant.now()
         );
     }

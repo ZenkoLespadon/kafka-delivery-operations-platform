@@ -12,9 +12,9 @@
     </parent>
 
     <groupId>com.github.zenkolespadon</groupId>
-    <artifactId>kafka-delivery-backend</artifactId>
+    <artifactId>delivery-backend</artifactId>
     <version>0.1.0-SNAPSHOT</version>
-    <name>Kafka Delivery Backend</name>
+    <name>Delivery Backend</name>
     <description>Real-time delivery operations backend with Kafka, Redis, PostgreSQL/PostGIS and WebSocket.</description>
 
     <properties>

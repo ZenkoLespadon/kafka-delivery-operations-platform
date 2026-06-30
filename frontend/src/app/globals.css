@@ -16,7 +16,7 @@ body {
 
 .dashboard {
     display: grid;
-    grid-template-columns: 1fr 360px;
+    grid-template-columns: minmax(0, 1fr) 440px;
     height: 100vh;
 }
 
@@ -60,6 +60,29 @@ body {
     font-size: 14px;
 }
 
+.toolbar {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.toolbar label {
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+.toolbar select {
+    width: 100%;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    background: #0f172a;
+    color: #e5e7eb;
+    padding: 8px 10px;
+    font: inherit;
+}
+
 .driver-list {
     display: grid;
     gap: 8px;
@@ -68,20 +91,102 @@ body {
 
 .driver-card {
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px 12px;
-    padding: 10px;
+    gap: 10px;
+    padding: 12px;
     border: 1px solid #1e293b;
     border-radius: 8px;
     background: #0f172a;
     font-size: 14px;
 }
 
-.driver-card span {
+.driver-card-header {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.driver-card-header strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.driver-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18);
+}
+
+.driver-status {
     color: #cbd5e1;
+    font-size: 12px;
+}
+
+.progress-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 58px;
+    align-items: center;
+    gap: 10px;
+}
+
+.progress-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 9999px;
+    background: #1e293b;
+}
+
+.progress-fill {
+    display: block;
+    height: 100%;
+    min-width: 2px;
+}
+
+.driver-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    margin: 0;
+}
+
+.driver-metrics div {
+    min-width: 0;
+}
+
+.driver-metrics dt {
+    margin: 0 0 2px;
+    color: #94a3b8;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.driver-metrics dd {
+    margin: 0;
+    overflow: hidden;
+    color: #cbd5e1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .popup {
     display: grid;
     gap: 4px;
+}
+
+@media (max-width: 900px) {
+    .dashboard {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(420px, 55vh) minmax(0, 45vh);
+    }
+
+    .driver-map {
+        height: 100%;
+    }
+
+    .side-panel {
+        border-top: 1px solid #334155;
+        border-left: 0;
+    }
 }

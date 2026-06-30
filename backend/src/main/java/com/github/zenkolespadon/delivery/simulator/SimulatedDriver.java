@@ -1,13 +1,25 @@
 package com.github.zenkolespadon.delivery.simulator;
 
+import com.github.zenkolespadon.delivery.event.GeoPoint;
+
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class SimulatedDriver {
 
     private final String driverId;
+    private final AtomicLong sequenceNumber;
+    private String deliveryId;
     private double lat;
     private double lng;
-    private final AtomicLong sequenceNumber;
+    private double routeStartLat;
+    private double routeStartLng;
+    private double routeEndLat;
+    private double routeEndLng;
+    private List<GeoPoint> routeGeometry = List.of();
+    private String routeSource = "NONE";
+    private int routeSegmentIndex;
+    private double routeDistanceKm;
 
     public SimulatedDriver(String driverId, double lat, double lng) {
         this.driverId = driverId;
@@ -20,6 +32,10 @@ public class SimulatedDriver {
         return driverId;
     }
 
+    public String deliveryId() {
+        return deliveryId;
+    }
+
     public double lat() {
         return lat;
     }
@@ -28,12 +44,152 @@ public class SimulatedDriver {
         return lng;
     }
 
+    public double routeStartLat() {
+        return routeStartLat;
+    }
+
+    public double routeStartLng() {
+        return routeStartLng;
+    }
+
+    public double routeEndLat() {
+        return routeEndLat;
+    }
+
+    public double routeEndLng() {
+        return routeEndLng;
+    }
+
+    public List<GeoPoint> routeGeometry() {
+        return routeGeometry;
+    }
+
+    public String routeSource() {
+        return routeSource;
+    }
+
     public long nextSequenceNumber() {
         return sequenceNumber.incrementAndGet();
     }
 
-    public void move(double deltaLat, double deltaLng) {
-        this.lat += deltaLat;
-        this.lng += deltaLng;
+    public long currentSequenceNumber() {
+        return sequenceNumber.get();
+    }
+
+    public boolean hasActiveRoute() {
+        return deliveryId != null;
+    }
+
+    public void assignRoute(String deliveryId, List<GeoPoint> routeGeometry, String routeSource) {
+        if (routeGeometry.size() < 2) {
+            throw new IllegalArgumentException("A simulated route must contain at least two points");
+        }
+
+        GeoPoint start = routeGeometry.getFirst();
+        GeoPoint end = routeGeometry.getLast();
+
+        this.deliveryId = deliveryId;
+        this.routeGeometry = List.copyOf(routeGeometry);
+        this.routeSource = routeSource;
+        this.routeSegmentIndex = 0;
+        this.routeStartLat = start.lat();
+        this.routeStartLng = start.lng();
+        this.routeEndLat = end.lat();
+        this.routeEndLng = end.lng();
+        this.routeDistanceKm = calculateRouteDistanceKm(routeGeometry);
+        this.lat = start.lat();
+        this.lng = start.lng();
+    }
+
+    public void clearRoute() {
+        this.deliveryId = null;
+        this.routeGeometry = List.of();
+        this.routeSource = "NONE";
+        this.routeSegmentIndex = 0;
+        this.routeStartLat = lat;
+        this.routeStartLng = lng;
+        this.routeEndLat = lat;
+        this.routeEndLng = lng;
+        this.routeDistanceKm = 0;
+    }
+
+    public void moveAlongRoute(double maxStepDegrees) {
+        if (!hasActiveRoute()) {
+            return;
+        }
+
+        double remainingStep = maxStepDegrees;
+
+        while (remainingStep > 0 && routeSegmentIndex < routeGeometry.size() - 1) {
+            GeoPoint target = routeGeometry.get(routeSegmentIndex + 1);
+            double deltaLat = target.lat() - lat;
+            double deltaLng = target.lng() - lng;
+            double distanceDegrees = Math.sqrt(deltaLat * deltaLat + deltaLng * deltaLng);
+
+            if (distanceDegrees <= remainingStep) {
+                lat = target.lat();
+                lng = target.lng();
+                remainingStep -= distanceDegrees;
+                routeSegmentIndex++;
+                continue;
+            }
+
+            lat += deltaLat / distanceDegrees * remainingStep;
+            lng += deltaLng / distanceDegrees * remainingStep;
+            remainingStep = 0;
+        }
+    }
+
+    public boolean hasArrived() {
+        return hasActiveRoute() && routeSegmentIndex >= routeGeometry.size() - 1;
+    }
+
+    public double progressPercent() {
+        if (!hasActiveRoute()) {
+            return 100;
+        }
+
+        if (routeDistanceKm <= 0) {
+            return 0;
+        }
+
+        double completedKm = 0;
+
+        for (int i = 0; i < routeSegmentIndex; i++) {
+            GeoPoint start = routeGeometry.get(i);
+            GeoPoint end = routeGeometry.get(i + 1);
+            completedKm += distanceKm(start.lat(), start.lng(), end.lat(), end.lng());
+        }
+
+        if (routeSegmentIndex < routeGeometry.size() - 1) {
+            GeoPoint segmentStart = routeGeometry.get(routeSegmentIndex);
+            completedKm += distanceKm(segmentStart.lat(), segmentStart.lng(), lat, lng);
+        }
+
+        double progress = completedKm / routeDistanceKm * 100.0;
+        return Math.max(0, Math.min(100, progress));
+    }
+
+    static double distanceKm(double startLat, double startLng, double endLat, double endLng) {
+        double earthRadiusKm = 6371.0;
+        double deltaLat = Math.toRadians(endLat - startLat);
+        double deltaLng = Math.toRadians(endLng - startLng);
+        double a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2)
+                + Math.cos(Math.toRadians(startLat)) * Math.cos(Math.toRadians(endLat))
+                * Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return earthRadiusKm * c;
+    }
+
+    private static double calculateRouteDistanceKm(List<GeoPoint> routeGeometry) {
+        double distance = 0;
+
+        for (int i = 0; i < routeGeometry.size() - 1; i++) {
+            GeoPoint start = routeGeometry.get(i);
+            GeoPoint end = routeGeometry.get(i + 1);
+            distance += distanceKm(start.lat(), start.lng(), end.lat(), end.lng());
+        }
+
+        return distance;
     }
 }

@@ -12,8 +12,20 @@ export type DriverLiveState = {
     deliveryId: string | null;
     lat: number;
     lng: number;
+    routeStartLat: number;
+    routeStartLng: number;
+    routeEndLat: number;
+    routeEndLng: number;
+    routeGeometry: GeoPoint[];
+    routeSource: string;
+    progressPercent: number;
     speedKmh: number;
     status: DriverStatus;
     eventTimestamp: string;
     sequenceNumber: number;
+};
+
+export type GeoPoint = {
+    lat: number;
+    lng: number;
 };

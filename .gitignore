@@ -1,0 +1,13 @@
+.idea/
+
+**/target/
+**/build/
+**/dist/
+
+**/node_modules/
+**/.next/
+
+*.iml
+*.log
+.env
+.env.*

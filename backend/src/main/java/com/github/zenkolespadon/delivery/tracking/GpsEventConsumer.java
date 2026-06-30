@@ -14,7 +14,7 @@ public class GpsEventConsumer {
     }
 
     @KafkaListener(
-            topics = "${app.kafka.topics.gps-events}",
+            topics = "${delivery.kafka.topics.gps-events}",
             groupId = "tracking-service"
     )
     public void consume(GpsEvent event) {

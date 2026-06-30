@@ -1,9 +1,9 @@
 spring:
   application:
-    name: kafka-delivery-backend
+    name: delivery-backend
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/delivery_ops
+    url: jdbc:postgresql://localhost:5433/delivery
     username: delivery
     password: delivery
 
@@ -54,23 +54,21 @@ management:
         enabled: true
 
 app:
-  kafka:
-    topics:
-      gps-events: gps-events
-      delivery-events: delivery-events
-      driver-events: driver-events
-      eta-updated: eta-updated
-      geofence-events: geofence-events
-      delivery-alerts: delivery-alerts
-      dead-letter-events: dead-letter-events
+  cors:
+    allowed-origins: http://localhost:3000
 
   simulation:
     enabled: true
-    driver-count: 50
+    driver-count: 10
     publish-interval-ms: 2000
     center-lat: 43.6045
     center-lng: 1.4440
     spawn-radius-km: 5
+
+  routing:
+    osrm-enabled: true
+    osrm-base-url: http://localhost:5000
+    request-timeout-ms: 1500
 
   websocket:
     drivers-live-broadcast-interval-ms: 2000

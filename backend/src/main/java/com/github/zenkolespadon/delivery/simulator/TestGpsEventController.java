@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -25,6 +26,13 @@ public class TestGpsEventController {
                 "delivery_1",
                 43.6045,
                 1.4440,
+                43.6045,
+                1.4440,
+                43.61,
+                1.45,
+                List.of(),
+                "TEST",
+                0.0,
                 32.0,
                 DriverStatus.DRIVING,
                 Instant.now(),

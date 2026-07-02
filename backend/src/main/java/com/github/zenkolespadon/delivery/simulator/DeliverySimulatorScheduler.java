@@ -1,7 +1,11 @@
 package com.github.zenkolespadon.delivery.simulator;
 
+import com.github.zenkolespadon.delivery.delivery.DeliveryStatus;
 import com.github.zenkolespadon.delivery.driver.DriverStatus;
+import com.github.zenkolespadon.delivery.event.DeliveryAssignedEvent;
+import com.github.zenkolespadon.delivery.event.EtaUpdatedEvent;
 import com.github.zenkolespadon.delivery.event.GeoPoint;
+import com.github.zenkolespadon.delivery.event.GeofenceEvent;
 import com.github.zenkolespadon.delivery.event.GpsEvent;
 import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -27,6 +31,7 @@ public class DeliverySimulatorScheduler {
     private static final double SPAWN_ANCHOR_JITTER_KM = 0.9;
     private static final double ROUTE_ANCHOR_JITTER_KM = 1.4;
     private static final double MIN_ROUTE_DISTANCE_KM = 4.5;
+    private static final double AVERAGE_DELIVERY_SPEED_KMH = 28.0;
     private static final List<GeoPoint> SPAWN_ANCHORS = List.of(
             new GeoPoint(43.6045, 1.4440),
             new GeoPoint(43.6085, 1.4390),
@@ -54,18 +59,25 @@ public class DeliverySimulatorScheduler {
 
     private final DeliverySimulationProperties properties;
     private final GpsEventProducer gpsEventProducer;
+    private final DeliveryEventProducer deliveryEventProducer;
+    private final DeliveryOperationalEventProducer operationalEventProducer;
     private final OsrmRoutePlanner osrmRoutePlanner;
     private final StringRedisTemplate redisTemplate;
     private final List<SimulatedDriver> drivers = new ArrayList<>();
+    private final List<SimulatedDelivery> pendingDeliveries = new ArrayList<>();
 
     public DeliverySimulatorScheduler(
             DeliverySimulationProperties properties,
             GpsEventProducer gpsEventProducer,
+            DeliveryEventProducer deliveryEventProducer,
+            DeliveryOperationalEventProducer operationalEventProducer,
             OsrmRoutePlanner osrmRoutePlanner,
             StringRedisTemplate redisTemplate
     ) {
         this.properties = properties;
         this.gpsEventProducer = gpsEventProducer;
+        this.deliveryEventProducer = deliveryEventProducer;
+        this.operationalEventProducer = operationalEventProducer;
         this.osrmRoutePlanner = osrmRoutePlanner;
         this.redisTemplate = redisTemplate;
     }
@@ -88,6 +100,7 @@ public class DeliverySimulatorScheduler {
             );
 
             drivers.add(driver);
+            pendingDeliveries.add(createDelivery());
         }
     }
 
@@ -105,6 +118,8 @@ public class DeliverySimulatorScheduler {
             return;
         }
 
+        assignPendingDeliveries();
+
         for (SimulatedDriver driver : drivers) {
             moveDriver(driver);
             publishGpsEvent(driver);
@@ -112,19 +127,30 @@ public class DeliverySimulatorScheduler {
     }
 
     private void moveDriver(SimulatedDriver driver) {
-        if (!driver.hasActiveRoute()) {
-            assignNewRoute(driver);
+        if (driver.isDelivered()) {
+            driver.clearRoute();
+            pendingDeliveries.add(createDelivery());
+            return;
+        }
+
+        if (driver.isAwaitingDropoffRoute()) {
+            startDropoffRoute(driver);
+            return;
         }
 
         driver.moveAlongRoute(DRIVER_STEP_DEGREES);
 
         if (driver.hasArrived()) {
-            driver.clearRoute();
+            handleRouteArrival(driver);
         }
     }
 
     private void publishGpsEvent(SimulatedDriver driver) {
         Instant now = Instant.now();
+        double speedKmh = driver.hasActiveRoute()
+                ? ThreadLocalRandom.current().nextDouble(18.0, 42.0)
+                : 0.0;
+        long currentEtaSeconds = estimateCurrentEtaSeconds(driver, speedKmh);
 
         var event = new GpsEvent(
                 UUID.randomUUID().toString(),
@@ -136,31 +162,179 @@ public class DeliverySimulatorScheduler {
                 driver.routeStartLng(),
                 driver.routeEndLat(),
                 driver.routeEndLng(),
+                driver.pickup(),
+                driver.dropoff(),
                 driver.routeGeometry(),
                 driver.routeSource(),
+                driver.deliveryStatus(),
+                driver.initialEtaSeconds(),
+                currentEtaSeconds,
                 driver.progressPercent(),
-                ThreadLocalRandom.current().nextDouble(5.0, 45.0),
-                driver.hasActiveRoute() ? DriverStatus.DRIVING : DriverStatus.AVAILABLE,
+                speedKmh,
+                driverStatus(driver),
                 now,
                 now,
                 driver.nextSequenceNumber()
         );
 
         gpsEventProducer.send(event);
+
+        if (event.deliveryId() != null && currentEtaSeconds > 0) {
+            operationalEventProducer.sendEtaUpdated(new EtaUpdatedEvent(
+                    UUID.randomUUID().toString(),
+                    event.deliveryId(),
+                    event.driverId(),
+                    currentEtaSeconds,
+                    now
+            ));
+        }
     }
 
-    private void assignNewRoute(SimulatedDriver driver) {
-        GeoPoint destination = randomDistantDestination(driver.lat(), driver.lng());
-        double endLat = destination.lat();
-        double endLng = destination.lng();
-        var osrmRoute = osrmRoutePlanner.route(driver.lat(), driver.lng(), endLat, endLng);
-        List<GeoPoint> route = osrmRoute.orElseGet(() -> createStreetLikeRoute(driver.lat(), driver.lng(), endLat, endLng));
+    private DriverStatus driverStatus(SimulatedDriver driver) {
+        if (!driver.hasActiveRoute()) {
+            return DriverStatus.AVAILABLE;
+        }
 
-        driver.assignRoute(
-                "delivery_%s_%d".formatted(driver.driverId(), driver.currentSequenceNumber() + 1),
+        if (driver.deliveryStatus() == DeliveryStatus.DELIVERED) {
+            return DriverStatus.AVAILABLE;
+        }
+
+        if (driver.deliveryStatus() == DeliveryStatus.IN_TRANSIT) {
+            return DriverStatus.DELIVERING;
+        }
+
+        return DriverStatus.DRIVING;
+    }
+
+    private void handleRouteArrival(SimulatedDriver driver) {
+        if (driver.deliveryStatus() == DeliveryStatus.ASSIGNED) {
+            driver.markPickedUp();
+            publishGeofenceEvent(driver, "PICKUP_REACHED", driver.pickup(), DeliveryStatus.PICKED_UP);
+            return;
+        }
+
+        if (driver.deliveryStatus() == DeliveryStatus.IN_TRANSIT) {
+            driver.markDelivered();
+            publishGeofenceEvent(driver, "DROPOFF_REACHED", driver.dropoff(), DeliveryStatus.DELIVERED);
+        }
+    }
+
+    private void startDropoffRoute(SimulatedDriver driver) {
+        GeoPoint dropoff = driver.dropoff();
+        var osrmRoute = osrmRoutePlanner.route(driver.lat(), driver.lng(), dropoff.lat(), dropoff.lng());
+        List<GeoPoint> route = osrmRoute.orElseGet(() -> createStreetLikeRoute(driver.lat(), driver.lng(), dropoff.lat(), dropoff.lng()));
+
+        driver.startDropoffRoute(route, osrmRoute.isPresent() ? "OSRM" : "FALLBACK");
+    }
+
+    private void publishGeofenceEvent(
+            SimulatedDriver driver,
+            String geofenceType,
+            GeoPoint location,
+            DeliveryStatus deliveryStatus
+    ) {
+        if (driver.deliveryId() == null || location == null) {
+            return;
+        }
+
+        operationalEventProducer.sendGeofence(new GeofenceEvent(
+                UUID.randomUUID().toString(),
+                driver.deliveryId(),
+                driver.driverId(),
+                geofenceType,
+                location,
+                deliveryStatus,
+                Instant.now()
+        ));
+    }
+
+    private long estimateCurrentEtaSeconds(SimulatedDriver driver, double speedKmh) {
+        if (!driver.hasActiveRoute() || speedKmh <= 0) {
+            return 0;
+        }
+
+        if (driver.deliveryStatus() == DeliveryStatus.PICKED_UP || driver.deliveryStatus() == DeliveryStatus.DELIVERED) {
+            return 0;
+        }
+
+        return Math.max(1, Math.round(driver.remainingDistanceKm() / speedKmh * 3600));
+    }
+
+    private void assignPendingDeliveries() {
+        if (pendingDeliveries.isEmpty()) {
+            return;
+        }
+
+        List<SimulatedDelivery> assignedDeliveries = new ArrayList<>();
+
+        for (SimulatedDelivery delivery : pendingDeliveries) {
+            findClosestAvailableDriver(delivery.pickup()).ifPresent(driver -> {
+                assignDelivery(driver, delivery);
+                assignedDeliveries.add(delivery);
+            });
+        }
+
+        pendingDeliveries.removeAll(assignedDeliveries);
+    }
+
+    private java.util.Optional<SimulatedDriver> findClosestAvailableDriver(GeoPoint pickup) {
+        return drivers.stream()
+                .filter(driver -> !driver.hasActiveRoute())
+                .min((first, second) -> Double.compare(
+                        distanceKm(first.lat(), first.lng(), pickup.lat(), pickup.lng()),
+                        distanceKm(second.lat(), second.lng(), pickup.lat(), pickup.lng())
+                ));
+    }
+
+    private void assignDelivery(SimulatedDriver driver, SimulatedDelivery createdDelivery) {
+        SimulatedDelivery delivery = createdDelivery.assigned();
+        GeoPoint pickup = delivery.pickup();
+        var osrmRoute = osrmRoutePlanner.route(driver.lat(), driver.lng(), pickup.lat(), pickup.lng());
+        List<GeoPoint> route = osrmRoute.orElseGet(() -> createStreetLikeRoute(driver.lat(), driver.lng(), pickup.lat(), pickup.lng()));
+        long initialEtaSeconds = estimateEtaSeconds(route);
+
+        driver.assignDelivery(
+                delivery.deliveryId(),
+                delivery.pickup(),
+                delivery.dropoff(),
                 route,
-                osrmRoute.isPresent() ? "OSRM" : "FALLBACK"
+                osrmRoute.isPresent() ? "OSRM" : "FALLBACK",
+                initialEtaSeconds
         );
+
+        deliveryEventProducer.sendAssigned(new DeliveryAssignedEvent(
+                UUID.randomUUID().toString(),
+                delivery.deliveryId(),
+                driver.driverId(),
+                delivery.pickup(),
+                delivery.dropoff(),
+                initialEtaSeconds,
+                Instant.now()
+        ));
+    }
+
+    private SimulatedDelivery createDelivery() {
+        GeoPoint pickup = randomPointNear(SPAWN_ANCHORS.get(ThreadLocalRandom.current().nextInt(SPAWN_ANCHORS.size())), SPAWN_ANCHOR_JITTER_KM);
+        GeoPoint dropoff = randomDistantDestination(pickup.lat(), pickup.lng());
+
+        return new SimulatedDelivery(
+                "delivery_%s".formatted(UUID.randomUUID().toString().substring(0, 8)),
+                pickup,
+                dropoff,
+                DeliveryStatus.CREATED
+        );
+    }
+
+    private long estimateEtaSeconds(List<GeoPoint> route) {
+        double distanceKm = 0;
+
+        for (int i = 0; i < route.size() - 1; i++) {
+            GeoPoint start = route.get(i);
+            GeoPoint end = route.get(i + 1);
+            distanceKm += distanceKm(start.lat(), start.lng(), end.lat(), end.lng());
+        }
+
+        return Math.max(60, Math.round(distanceKm / AVERAGE_DELIVERY_SPEED_KMH * 3600));
     }
 
     private GeoPoint randomDistantDestination(double startLat, double startLng) {

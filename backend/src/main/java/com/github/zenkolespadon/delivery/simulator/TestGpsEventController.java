@@ -1,6 +1,8 @@
 package com.github.zenkolespadon.delivery.simulator;
 
+import com.github.zenkolespadon.delivery.delivery.DeliveryStatus;
 import com.github.zenkolespadon.delivery.driver.DriverStatus;
+import com.github.zenkolespadon.delivery.event.GeoPoint;
 import com.github.zenkolespadon.delivery.event.GpsEvent;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,8 +32,13 @@ public class TestGpsEventController {
                 1.4440,
                 43.61,
                 1.45,
+                new GeoPoint(43.6045, 1.4440),
+                new GeoPoint(43.61, 1.45),
                 List.of(),
                 "TEST",
+                DeliveryStatus.ASSIGNED,
+                300,
+                240,
                 0.0,
                 32.0,
                 DriverStatus.DRIVING,

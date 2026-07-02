@@ -1,5 +1,6 @@
 package com.github.zenkolespadon.delivery.simulator;
 
+import com.github.zenkolespadon.delivery.delivery.DeliveryStatus;
 import com.github.zenkolespadon.delivery.event.GeoPoint;
 
 import java.util.List;
@@ -10,6 +11,10 @@ public class SimulatedDriver {
     private final String driverId;
     private final AtomicLong sequenceNumber;
     private String deliveryId;
+    private GeoPoint pickup;
+    private GeoPoint dropoff;
+    private DeliveryStatus deliveryStatus;
+    private long initialEtaSeconds;
     private double lat;
     private double lng;
     private double routeStartLat;
@@ -34,6 +39,22 @@ public class SimulatedDriver {
 
     public String deliveryId() {
         return deliveryId;
+    }
+
+    public GeoPoint pickup() {
+        return pickup;
+    }
+
+    public GeoPoint dropoff() {
+        return dropoff;
+    }
+
+    public DeliveryStatus deliveryStatus() {
+        return deliveryStatus;
+    }
+
+    public long initialEtaSeconds() {
+        return initialEtaSeconds;
     }
 
     public double lat() {
@@ -80,29 +101,65 @@ public class SimulatedDriver {
         return deliveryId != null;
     }
 
-    public void assignRoute(String deliveryId, List<GeoPoint> routeGeometry, String routeSource) {
-        if (routeGeometry.size() < 2) {
-            throw new IllegalArgumentException("A simulated route must contain at least two points");
-        }
-
-        GeoPoint start = routeGeometry.getFirst();
-        GeoPoint end = routeGeometry.getLast();
-
+    public void assignDelivery(
+            String deliveryId,
+            GeoPoint pickup,
+            GeoPoint dropoff,
+            List<GeoPoint> routeGeometry,
+            String routeSource,
+            long initialEtaSeconds
+    ) {
         this.deliveryId = deliveryId;
-        this.routeGeometry = List.copyOf(routeGeometry);
-        this.routeSource = routeSource;
+        this.pickup = pickup;
+        this.dropoff = dropoff;
+        this.deliveryStatus = DeliveryStatus.ASSIGNED;
+        this.initialEtaSeconds = initialEtaSeconds;
+        setRoute(routeGeometry, routeSource);
+    }
+
+    public void markPickedUp() {
+        this.deliveryStatus = DeliveryStatus.PICKED_UP;
+        this.routeGeometry = List.of();
+        this.routeSource = "NONE";
         this.routeSegmentIndex = 0;
-        this.routeStartLat = start.lat();
-        this.routeStartLng = start.lng();
-        this.routeEndLat = end.lat();
-        this.routeEndLng = end.lng();
-        this.routeDistanceKm = calculateRouteDistanceKm(routeGeometry);
-        this.lat = start.lat();
-        this.lng = start.lng();
+        this.routeDistanceKm = 0;
+        this.routeStartLat = lat;
+        this.routeStartLng = lng;
+        this.routeEndLat = lat;
+        this.routeEndLng = lng;
+    }
+
+    public void startDropoffRoute(List<GeoPoint> routeGeometry, String routeSource) {
+        this.deliveryStatus = DeliveryStatus.IN_TRANSIT;
+        setRoute(routeGeometry, routeSource);
+    }
+
+    public void markDelivered() {
+        this.deliveryStatus = DeliveryStatus.DELIVERED;
+        this.routeGeometry = List.of();
+        this.routeSource = "NONE";
+        this.routeSegmentIndex = 0;
+        this.routeDistanceKm = 0;
+        this.routeStartLat = lat;
+        this.routeStartLng = lng;
+        this.routeEndLat = lat;
+        this.routeEndLng = lng;
+    }
+
+    public boolean isAwaitingDropoffRoute() {
+        return deliveryStatus == DeliveryStatus.PICKED_UP;
+    }
+
+    public boolean isDelivered() {
+        return deliveryStatus == DeliveryStatus.DELIVERED;
     }
 
     public void clearRoute() {
         this.deliveryId = null;
+        this.pickup = null;
+        this.dropoff = null;
+        this.deliveryStatus = null;
+        this.initialEtaSeconds = 0;
         this.routeGeometry = List.of();
         this.routeSource = "NONE";
         this.routeSegmentIndex = 0;
@@ -114,7 +171,7 @@ public class SimulatedDriver {
     }
 
     public void moveAlongRoute(double maxStepDegrees) {
-        if (!hasActiveRoute()) {
+        if (!hasActiveRoute() || routeGeometry.size() < 2) {
             return;
         }
 
@@ -141,11 +198,15 @@ public class SimulatedDriver {
     }
 
     public boolean hasArrived() {
-        return hasActiveRoute() && routeSegmentIndex >= routeGeometry.size() - 1;
+        return hasActiveRoute() && routeGeometry.size() > 1 && routeSegmentIndex >= routeGeometry.size() - 1;
     }
 
     public double progressPercent() {
         if (!hasActiveRoute()) {
+            return 100;
+        }
+
+        if (deliveryStatus == DeliveryStatus.PICKED_UP || deliveryStatus == DeliveryStatus.DELIVERED) {
             return 100;
         }
 
@@ -170,6 +231,15 @@ public class SimulatedDriver {
         return Math.max(0, Math.min(100, progress));
     }
 
+    public double remainingDistanceKm() {
+        if (!hasActiveRoute() || routeGeometry.size() < 2 || routeDistanceKm <= 0) {
+            return 0;
+        }
+
+        double completedKm = routeDistanceKm * progressPercent() / 100.0;
+        return Math.max(0, routeDistanceKm - completedKm);
+    }
+
     static double distanceKm(double startLat, double startLng, double endLat, double endLng) {
         double earthRadiusKm = 6371.0;
         double deltaLat = Math.toRadians(endLat - startLat);
@@ -191,5 +261,25 @@ public class SimulatedDriver {
         }
 
         return distance;
+    }
+
+    private void setRoute(List<GeoPoint> routeGeometry, String routeSource) {
+        if (routeGeometry.size() < 2) {
+            throw new IllegalArgumentException("A simulated route must contain at least two points");
+        }
+
+        GeoPoint start = routeGeometry.getFirst();
+        GeoPoint end = routeGeometry.getLast();
+
+        this.routeGeometry = List.copyOf(routeGeometry);
+        this.routeSource = routeSource;
+        this.routeSegmentIndex = 0;
+        this.routeStartLat = start.lat();
+        this.routeStartLng = start.lng();
+        this.routeEndLat = end.lat();
+        this.routeEndLng = end.lng();
+        this.routeDistanceKm = calculateRouteDistanceKm(routeGeometry);
+        this.lat = start.lat();
+        this.lng = start.lng();
     }
 }

@@ -16,8 +16,13 @@ export type DriverLiveState = {
     routeStartLng: number;
     routeEndLat: number;
     routeEndLng: number;
+    pickup: GeoPoint | null;
+    dropoff: GeoPoint | null;
     routeGeometry: GeoPoint[];
     routeSource: string;
+    deliveryStatus: DeliveryStatus | null;
+    initialEtaSeconds: number;
+    currentEtaSeconds: number;
     progressPercent: number;
     speedKmh: number;
     status: DriverStatus;
@@ -29,3 +34,14 @@ export type GeoPoint = {
     lat: number;
     lng: number;
 };
+
+export type DeliveryStatus =
+    | "CREATED"
+    | "ASSIGNED"
+    | "PICKED_UP"
+    | "IN_TRANSIT"
+    | "ARRIVED_AT_DESTINATION"
+    | "DELIVERED"
+    | "FAILED"
+    | "DELAYED"
+    | "CANCELLED";

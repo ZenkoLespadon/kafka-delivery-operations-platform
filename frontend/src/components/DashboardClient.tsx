@@ -164,12 +164,32 @@ export function DashboardClient() {
                                     <dd>{driver.deliveryId ?? "none"}</dd>
                                 </div>
                                 <div>
+                                    <dt>Delivery status</dt>
+                                    <dd>{driver.deliveryStatus ?? "none"}</dd>
+                                </div>
+                                <div>
+                                    <dt>Initial ETA</dt>
+                                    <dd>{formatEta(driver.initialEtaSeconds)}</dd>
+                                </div>
+                                <div>
+                                    <dt>Current ETA</dt>
+                                    <dd>{formatEta(driver.currentEtaSeconds)}</dd>
+                                </div>
+                                <div>
                                     <dt>Route</dt>
                                     <dd>{driver.routeSource}</dd>
                                 </div>
                                 <div>
                                     <dt>Position</dt>
                                     <dd>{driver.lat.toFixed(5)}, {driver.lng.toFixed(5)}</dd>
+                                </div>
+                                <div>
+                                    <dt>Pickup</dt>
+                                    <dd>{formatPoint(driver.pickup)}</dd>
+                                </div>
+                                <div>
+                                    <dt>Dropoff</dt>
+                                    <dd>{formatPoint(driver.dropoff)}</dd>
                                 </div>
                                 <div>
                                     <dt>Destination</dt>
@@ -186,6 +206,22 @@ export function DashboardClient() {
             </aside>
         </main>
     );
+}
+
+function formatPoint(point: { lat: number; lng: number } | null) {
+    if (!point) {
+        return "none";
+    }
+
+    return `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+}
+
+function formatEta(seconds: number) {
+    if (!seconds) {
+        return "none";
+    }
+
+    return `${Math.round(seconds / 60)} min`;
 }
 
 function compareDrivers(a: DriverLiveState, b: DriverLiveState, sortMode: SortMode) {

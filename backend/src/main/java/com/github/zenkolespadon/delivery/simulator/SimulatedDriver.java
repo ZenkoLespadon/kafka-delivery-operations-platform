@@ -2,7 +2,9 @@ package com.github.zenkolespadon.delivery.simulator;
 
 import com.github.zenkolespadon.delivery.delivery.DeliveryStatus;
 import com.github.zenkolespadon.delivery.event.GeoPoint;
+import com.github.zenkolespadon.delivery.parcel.ParcelStatus;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -11,10 +13,14 @@ public class SimulatedDriver {
     private final String driverId;
     private final AtomicLong sequenceNumber;
     private String deliveryId;
+    private String parcelId;
+    private String pickupName;
     private GeoPoint pickup;
     private GeoPoint dropoff;
     private DeliveryStatus deliveryStatus;
+    private ParcelStatus parcelStatus;
     private long initialEtaSeconds;
+    private Instant promisedDeliveryAt;
     private double lat;
     private double lng;
     private double routeStartLat;
@@ -25,6 +31,10 @@ public class SimulatedDriver {
     private String routeSource = "NONE";
     private int routeSegmentIndex;
     private double routeDistanceKm;
+    private int assignedParcels;
+    private int deliveredParcels;
+    private long plannedDropoffEtaSeconds;
+    private boolean finished;
 
     public SimulatedDriver(String driverId, double lat, double lng) {
         this.driverId = driverId;
@@ -41,6 +51,14 @@ public class SimulatedDriver {
         return deliveryId;
     }
 
+    public String parcelId() {
+        return parcelId;
+    }
+
+    public String pickupName() {
+        return pickupName;
+    }
+
     public GeoPoint pickup() {
         return pickup;
     }
@@ -53,8 +71,32 @@ public class SimulatedDriver {
         return deliveryStatus;
     }
 
+    public ParcelStatus parcelStatus() {
+        return parcelStatus;
+    }
+
     public long initialEtaSeconds() {
         return initialEtaSeconds;
+    }
+
+    public Instant promisedDeliveryAt() {
+        return promisedDeliveryAt;
+    }
+
+    public int assignedParcels() {
+        return assignedParcels;
+    }
+
+    public int deliveredParcels() {
+        return deliveredParcels;
+    }
+
+    public long plannedDropoffEtaSeconds() {
+        return plannedDropoffEtaSeconds;
+    }
+
+    public boolean isFinished() {
+        return finished;
     }
 
     public double lat() {
@@ -103,22 +145,40 @@ public class SimulatedDriver {
 
     public void assignDelivery(
             String deliveryId,
+            String parcelId,
+            String pickupName,
             GeoPoint pickup,
             GeoPoint dropoff,
             List<GeoPoint> routeGeometry,
             String routeSource,
-            long initialEtaSeconds
+            long initialEtaSeconds,
+            long plannedDropoffEtaSeconds,
+            Instant promisedDeliveryAt
     ) {
+        this.finished = false;
         this.deliveryId = deliveryId;
+        this.parcelId = parcelId;
+        this.pickupName = pickupName;
         this.pickup = pickup;
         this.dropoff = dropoff;
         this.deliveryStatus = DeliveryStatus.ASSIGNED;
+        this.parcelStatus = ParcelStatus.ASSIGNED;
         this.initialEtaSeconds = initialEtaSeconds;
+        this.plannedDropoffEtaSeconds = plannedDropoffEtaSeconds;
+        this.promisedDeliveryAt = promisedDeliveryAt;
         setRoute(routeGeometry, routeSource);
+    }
+
+    public void startNewCycle(int assignedParcels) {
+        clearRoute();
+        this.assignedParcels = assignedParcels;
+        this.deliveredParcels = 0;
+        this.finished = false;
     }
 
     public void markPickedUp() {
         this.deliveryStatus = DeliveryStatus.PICKED_UP;
+        this.parcelStatus = ParcelStatus.PICKED_UP;
         this.routeGeometry = List.of();
         this.routeSource = "NONE";
         this.routeSegmentIndex = 0;
@@ -131,11 +191,15 @@ public class SimulatedDriver {
 
     public void startDropoffRoute(List<GeoPoint> routeGeometry, String routeSource) {
         this.deliveryStatus = DeliveryStatus.IN_TRANSIT;
+        this.parcelStatus = ParcelStatus.OUT_FOR_DELIVERY;
+        this.plannedDropoffEtaSeconds = 0;
         setRoute(routeGeometry, routeSource);
     }
 
     public void markDelivered() {
         this.deliveryStatus = DeliveryStatus.DELIVERED;
+        this.parcelStatus = ParcelStatus.DELIVERED;
+        this.deliveredParcels++;
         this.routeGeometry = List.of();
         this.routeSource = "NONE";
         this.routeSegmentIndex = 0;
@@ -154,12 +218,22 @@ public class SimulatedDriver {
         return deliveryStatus == DeliveryStatus.DELIVERED;
     }
 
+    public void markFinished() {
+        clearRoute();
+        this.finished = true;
+    }
+
     public void clearRoute() {
         this.deliveryId = null;
+        this.parcelId = null;
+        this.pickupName = null;
         this.pickup = null;
         this.dropoff = null;
         this.deliveryStatus = null;
+        this.parcelStatus = null;
         this.initialEtaSeconds = 0;
+        this.plannedDropoffEtaSeconds = 0;
+        this.promisedDeliveryAt = null;
         this.routeGeometry = List.of();
         this.routeSource = "NONE";
         this.routeSegmentIndex = 0;
@@ -194,6 +268,32 @@ public class SimulatedDriver {
             lat += deltaLat / distanceDegrees * remainingStep;
             lng += deltaLng / distanceDegrees * remainingStep;
             remainingStep = 0;
+        }
+    }
+
+    public void moveAlongRouteKm(double maxStepKm) {
+        if (!hasActiveRoute() || routeGeometry.size() < 2) {
+            return;
+        }
+
+        double remainingStepKm = maxStepKm;
+
+        while (remainingStepKm > 0 && routeSegmentIndex < routeGeometry.size() - 1) {
+            GeoPoint target = routeGeometry.get(routeSegmentIndex + 1);
+            double segmentDistanceKm = distanceKm(lat, lng, target.lat(), target.lng());
+
+            if (segmentDistanceKm <= remainingStepKm) {
+                lat = target.lat();
+                lng = target.lng();
+                remainingStepKm -= segmentDistanceKm;
+                routeSegmentIndex++;
+                continue;
+            }
+
+            double ratio = remainingStepKm / segmentDistanceKm;
+            lat += (target.lat() - lat) * ratio;
+            lng += (target.lng() - lng) * ratio;
+            remainingStepKm = 0;
         }
     }
 

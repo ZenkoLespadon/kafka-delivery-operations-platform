@@ -7,6 +7,7 @@ import com.github.zenkolespadon.delivery.event.EtaUpdatedEvent;
 import com.github.zenkolespadon.delivery.event.GeoPoint;
 import com.github.zenkolespadon.delivery.event.GeofenceEvent;
 import com.github.zenkolespadon.delivery.event.GpsEvent;
+import com.github.zenkolespadon.delivery.parcel.ParcelStatus;
 import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -14,8 +15,12 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -26,12 +31,12 @@ public class DeliverySimulatorScheduler {
 
     private static final double KM_TO_LAT_DEGREES = 1.0 / 111.0;
     private static final double EARTH_RADIUS_KM = 6371.0;
-    private static final double DRIVER_STEP_DEGREES = 0.0012;
     private static final double STREET_GRID_DEGREES = 0.0025;
     private static final double SPAWN_ANCHOR_JITTER_KM = 0.9;
     private static final double ROUTE_ANCHOR_JITTER_KM = 1.4;
     private static final double MIN_ROUTE_DISTANCE_KM = 4.5;
     private static final double AVERAGE_DELIVERY_SPEED_KMH = 28.0;
+    private static final int PARCELS_PER_CYCLE = 50;
     private static final List<GeoPoint> SPAWN_ANCHORS = List.of(
             new GeoPoint(43.6045, 1.4440),
             new GeoPoint(43.6085, 1.4390),
@@ -56,6 +61,14 @@ public class DeliverySimulatorScheduler {
             new GeoPoint(43.6000, 1.5200),
             new GeoPoint(43.6500, 1.4100)
     );
+    private static final List<PickupPoint> PICKUP_POINTS = List.of(
+            new PickupPoint("Capitole Hub", new GeoPoint(43.6045, 1.4440)),
+            new PickupPoint("Jean Jaures Locker", new GeoPoint(43.6059, 1.4494)),
+            new PickupPoint("Saint-Cyprien Store", new GeoPoint(43.5987, 1.4319)),
+            new PickupPoint("Matabiau Depot", new GeoPoint(43.6115, 1.4537)),
+            new PickupPoint("Carmes Counter", new GeoPoint(43.5991, 1.4458)),
+            new PickupPoint("Compans Pickup", new GeoPoint(43.6119, 1.4358))
+    );
 
     private final DeliverySimulationProperties properties;
     private final GpsEventProducer gpsEventProducer;
@@ -64,7 +77,11 @@ public class DeliverySimulatorScheduler {
     private final OsrmRoutePlanner osrmRoutePlanner;
     private final StringRedisTemplate redisTemplate;
     private final List<SimulatedDriver> drivers = new ArrayList<>();
-    private final List<SimulatedDelivery> pendingDeliveries = new ArrayList<>();
+    private final Map<String, Queue<SimulatedDelivery>> driverDeliveryQueues = new HashMap<>();
+    private final Map<String, TrafficState> trafficStates = new HashMap<>();
+    private int totalParcels;
+    private int deliveredParcels;
+    private int cycleNumber;
 
     public DeliverySimulatorScheduler(
             DeliverySimulationProperties properties,
@@ -100,12 +117,18 @@ public class DeliverySimulatorScheduler {
             );
 
             drivers.add(driver);
-            pendingDeliveries.add(createDelivery());
         }
+
+        startNewCycle();
     }
 
     private void clearPreviousLiveDriverStates() {
-        Set<String> keys = redisTemplate.keys("driver:*:state");
+        deleteRedisKeys("driver:*:state");
+        deleteRedisKeys("driver:*:last-event");
+    }
+
+    private void deleteRedisKeys(String pattern) {
+        Set<String> keys = redisTemplate.keys(pattern);
 
         if (keys != null && !keys.isEmpty()) {
             redisTemplate.delete(keys);
@@ -118,18 +141,32 @@ public class DeliverySimulatorScheduler {
             return;
         }
 
-        assignPendingDeliveries();
+        if (allDriversFinished()) {
+            startNewCycle();
+        }
 
         for (SimulatedDriver driver : drivers) {
-            moveDriver(driver);
-            publishGpsEvent(driver);
+            double trafficMultiplier = trafficMultiplier(driver);
+            double speedKmh = speedKmh(driver, trafficMultiplier);
+            moveDriver(driver, speedKmh);
+            publishGpsEvent(driver, trafficMultiplier, speedKmh);
         }
     }
 
-    private void moveDriver(SimulatedDriver driver) {
+    private void moveDriver(SimulatedDriver driver, double speedKmh) {
+        if (driver.isFinished()) {
+            return;
+        }
+
         if (driver.isDelivered()) {
+            deliveredParcels++;
             driver.clearRoute();
-            pendingDeliveries.add(createDelivery());
+            assignNextDelivery(driver);
+            return;
+        }
+
+        if (!driver.hasActiveRoute()) {
+            assignNextDelivery(driver);
             return;
         }
 
@@ -138,24 +175,26 @@ public class DeliverySimulatorScheduler {
             return;
         }
 
-        driver.moveAlongRoute(DRIVER_STEP_DEGREES);
+        double stepKm = speedKmh * (properties.publishIntervalMs() / 3_600_000.0);
+        driver.moveAlongRouteKm(stepKm);
 
         if (driver.hasArrived()) {
             handleRouteArrival(driver);
         }
     }
 
-    private void publishGpsEvent(SimulatedDriver driver) {
+    private void publishGpsEvent(SimulatedDriver driver, double trafficMultiplier, double speedKmh) {
         Instant now = Instant.now();
-        double speedKmh = driver.hasActiveRoute()
-                ? ThreadLocalRandom.current().nextDouble(18.0, 42.0)
-                : 0.0;
-        long currentEtaSeconds = estimateCurrentEtaSeconds(driver, speedKmh);
+        long currentEtaSeconds = estimateCurrentDeliveryEtaSeconds(driver, trafficMultiplier, speedKmh);
+        long delaySeconds = estimateDelaySeconds(driver, currentEtaSeconds, now);
+        long projectedNextDelaySeconds = 0;
+        boolean delayed = delaySeconds > 0;
 
         var event = new GpsEvent(
                 UUID.randomUUID().toString(),
                 driver.driverId(),
                 driver.deliveryId(),
+                driver.parcelId(),
                 driver.lat(),
                 driver.lng(),
                 driver.routeStartLat(),
@@ -163,15 +202,30 @@ public class DeliverySimulatorScheduler {
                 driver.routeEndLat(),
                 driver.routeEndLng(),
                 driver.pickup(),
+                driver.pickupName(),
                 driver.dropoff(),
                 driver.routeGeometry(),
                 driver.routeSource(),
                 driver.deliveryStatus(),
+                delayed && driver.parcelStatus() != null && driver.parcelStatus() != ParcelStatus.DELIVERED
+                        ? ParcelStatus.DELAYED
+                        : driver.parcelStatus(),
                 driver.initialEtaSeconds(),
                 currentEtaSeconds,
+                delaySeconds,
+                projectedNextDelaySeconds,
+                delayed,
+                trafficMultiplier,
+                totalParcels,
+                queuedParcelCount(),
+                activeParcelCount(),
+                deliveredParcels,
+                driver.assignedParcels(),
+                driver.deliveredParcels(),
+                estimateOperationEtaSeconds(),
                 driver.progressPercent(),
                 speedKmh,
-                driverStatus(driver),
+                delayed ? DriverStatus.DELAYED : driverStatus(driver),
                 now,
                 now,
                 driver.nextSequenceNumber()
@@ -191,6 +245,10 @@ public class DeliverySimulatorScheduler {
     }
 
     private DriverStatus driverStatus(SimulatedDriver driver) {
+        if (driver.isFinished()) {
+            return DriverStatus.FINISHED;
+        }
+
         if (!driver.hasActiveRoute()) {
             return DriverStatus.AVAILABLE;
         }
@@ -248,58 +306,55 @@ public class DeliverySimulatorScheduler {
         ));
     }
 
-    private long estimateCurrentEtaSeconds(SimulatedDriver driver, double speedKmh) {
-        if (!driver.hasActiveRoute() || speedKmh <= 0) {
+    private long estimateCurrentDeliveryEtaSeconds(SimulatedDriver driver, double trafficMultiplier, double speedKmh) {
+        if (!driver.hasActiveRoute()) {
             return 0;
         }
 
-        if (driver.deliveryStatus() == DeliveryStatus.PICKED_UP || driver.deliveryStatus() == DeliveryStatus.DELIVERED) {
+        if (driver.deliveryStatus() == DeliveryStatus.DELIVERED) {
             return 0;
         }
 
-        return Math.max(1, Math.round(driver.remainingDistanceKm() / speedKmh * 3600));
-    }
-
-    private void assignPendingDeliveries() {
-        if (pendingDeliveries.isEmpty()) {
-            return;
+        if (driver.deliveryStatus() == DeliveryStatus.PICKED_UP) {
+            return Math.round(driver.plannedDropoffEtaSeconds() * trafficMultiplier);
         }
 
-        List<SimulatedDelivery> assignedDeliveries = new ArrayList<>();
+        long currentRouteEtaSeconds = estimateEtaSeconds(driver.remainingDistanceKm(), speedKmh);
 
-        for (SimulatedDelivery delivery : pendingDeliveries) {
-            findClosestAvailableDriver(delivery.pickup()).ifPresent(driver -> {
-                assignDelivery(driver, delivery);
-                assignedDeliveries.add(delivery);
-            });
+        if (driver.deliveryStatus() == DeliveryStatus.ASSIGNED) {
+            return currentRouteEtaSeconds + Math.round(driver.plannedDropoffEtaSeconds() * trafficMultiplier);
         }
 
-        pendingDeliveries.removeAll(assignedDeliveries);
-    }
-
-    private java.util.Optional<SimulatedDriver> findClosestAvailableDriver(GeoPoint pickup) {
-        return drivers.stream()
-                .filter(driver -> !driver.hasActiveRoute())
-                .min((first, second) -> Double.compare(
-                        distanceKm(first.lat(), first.lng(), pickup.lat(), pickup.lng()),
-                        distanceKm(second.lat(), second.lng(), pickup.lat(), pickup.lng())
-                ));
+        return currentRouteEtaSeconds;
     }
 
     private void assignDelivery(SimulatedDriver driver, SimulatedDelivery createdDelivery) {
-        SimulatedDelivery delivery = createdDelivery.assigned();
-        GeoPoint pickup = delivery.pickup();
+        GeoPoint pickup = createdDelivery.pickup();
         var osrmRoute = osrmRoutePlanner.route(driver.lat(), driver.lng(), pickup.lat(), pickup.lng());
         List<GeoPoint> route = osrmRoute.orElseGet(() -> createStreetLikeRoute(driver.lat(), driver.lng(), pickup.lat(), pickup.lng()));
-        long initialEtaSeconds = estimateEtaSeconds(route);
+        GeoPoint dropoff = createdDelivery.dropoff();
+        List<GeoPoint> dropoffPreviewRoute = osrmRoutePlanner
+                .route(pickup.lat(), pickup.lng(), dropoff.lat(), dropoff.lng())
+                .orElseGet(() -> createStreetLikeRoute(pickup.lat(), pickup.lng(), dropoff.lat(), dropoff.lng()));
+        long pickupEtaSeconds = estimateEtaSeconds(route);
+        long dropoffEtaSeconds = estimateEtaSeconds(dropoffPreviewRoute);
+        long expectedEtaSeconds = pickupEtaSeconds + dropoffEtaSeconds;
+        long initialEtaSeconds = Math.max(60, Math.round(expectedEtaSeconds * ThreadLocalRandom.current().nextDouble(1.04, 1.16)));
+        Instant now = Instant.now();
+        Instant promisedDeliveryAt = now.plusSeconds(initialEtaSeconds);
+        SimulatedDelivery delivery = createdDelivery.assigned(promisedDeliveryAt);
 
         driver.assignDelivery(
                 delivery.deliveryId(),
+                delivery.parcelId(),
+                delivery.pickupName(),
                 delivery.pickup(),
                 delivery.dropoff(),
                 route,
                 osrmRoute.isPresent() ? "OSRM" : "FALLBACK",
-                initialEtaSeconds
+                initialEtaSeconds,
+                dropoffEtaSeconds,
+                promisedDeliveryAt
         );
 
         deliveryEventProducer.sendAssigned(new DeliveryAssignedEvent(
@@ -309,20 +364,131 @@ public class DeliverySimulatorScheduler {
                 delivery.pickup(),
                 delivery.dropoff(),
                 initialEtaSeconds,
-                Instant.now()
+                now
         ));
     }
 
-    private SimulatedDelivery createDelivery() {
-        GeoPoint pickup = randomPointNear(SPAWN_ANCHORS.get(ThreadLocalRandom.current().nextInt(SPAWN_ANCHORS.size())), SPAWN_ANCHOR_JITTER_KM);
+    private SimulatedDelivery createDelivery(int parcelNumber) {
+        PickupPoint pickupPoint = PICKUP_POINTS.get(ThreadLocalRandom.current().nextInt(PICKUP_POINTS.size()));
+        GeoPoint pickup = randomPointNear(pickupPoint.location(), 0.25);
         GeoPoint dropoff = randomDistantDestination(pickup.lat(), pickup.lng());
 
         return new SimulatedDelivery(
-                "delivery_%s".formatted(UUID.randomUUID().toString().substring(0, 8)),
+                "cycle_%d_delivery_%s".formatted(cycleNumber, UUID.randomUUID().toString().substring(0, 8)),
+                "cycle_%d_parcel_%04d".formatted(cycleNumber, parcelNumber),
+                pickupPoint.name(),
                 pickup,
                 dropoff,
-                DeliveryStatus.CREATED
+                DeliveryStatus.CREATED,
+                ParcelStatus.WAITING_PICKUP,
+                Instant.now(),
+                null
         );
+    }
+
+    private void startNewCycle() {
+        cycleNumber++;
+        totalParcels = PARCELS_PER_CYCLE;
+        deliveredParcels = 0;
+        driverDeliveryQueues.clear();
+        trafficStates.clear();
+
+        List<List<SimulatedDelivery>> deliveriesByDriver = new ArrayList<>();
+
+        for (int i = 0; i < drivers.size(); i++) {
+            deliveriesByDriver.add(new ArrayList<>());
+        }
+
+        for (int i = 0; i < PARCELS_PER_CYCLE; i++) {
+            SimulatedDelivery delivery = createDelivery(i + 1);
+            deliveriesByDriver.get(i % drivers.size()).add(delivery);
+        }
+
+        for (int i = 0; i < drivers.size(); i++) {
+            SimulatedDriver driver = drivers.get(i);
+            List<SimulatedDelivery> assignedDeliveries = deliveriesByDriver.get(i);
+            driver.startNewCycle(assignedDeliveries.size());
+            driverDeliveryQueues.put(driver.driverId(), new ArrayDeque<>(assignedDeliveries));
+        }
+    }
+
+    private boolean allDriversFinished() {
+        return !drivers.isEmpty() && drivers.stream().allMatch(SimulatedDriver::isFinished);
+    }
+
+    private void assignNextDelivery(SimulatedDriver driver) {
+        Queue<SimulatedDelivery> queue = driverDeliveryQueues.get(driver.driverId());
+
+        if (queue == null || queue.isEmpty()) {
+            driver.markFinished();
+            return;
+        }
+
+        assignDelivery(driver, queue.poll());
+    }
+
+    private int queuedParcelCount() {
+        return driverDeliveryQueues.values().stream().mapToInt(Queue::size).sum();
+    }
+
+    private int activeParcelCount() {
+        return (int) drivers.stream().filter(SimulatedDriver::hasActiveRoute).count();
+    }
+
+    private long estimateOperationEtaSeconds() {
+        int remainingParcels = queuedParcelCount() + activeParcelCount();
+
+        if (remainingParcels == 0) {
+            return 0;
+        }
+
+        int availableCapacity = Math.max(1, properties.driverCount());
+        double averageParcelSeconds = 14 * 60;
+        return Math.round(Math.ceil((double) remainingParcels / availableCapacity) * averageParcelSeconds);
+    }
+
+    private double trafficMultiplier(SimulatedDriver driver) {
+        if (!driver.hasActiveRoute()) {
+            return 1.0;
+        }
+
+        Instant now = Instant.now();
+        TrafficState currentState = trafficStates.get(driver.driverId());
+
+        if (currentState != null && currentState.expiresAt().isAfter(now)) {
+            return currentState.multiplier();
+        }
+
+        double centerLoad = distanceKm(driver.lat(), driver.lng(), 43.6045, 1.4440) < 1.8 ? 0.15 : 0.0;
+
+        if (ThreadLocalRandom.current().nextDouble() < 0.08) {
+            double incidentLoad = ThreadLocalRandom.current().nextDouble(0.35, 0.95);
+            long durationSeconds = ThreadLocalRandom.current().nextLong(30, 91);
+            TrafficState nextState = new TrafficState(1.0 + centerLoad + incidentLoad, now.plusSeconds(durationSeconds));
+            trafficStates.put(driver.driverId(), nextState);
+            return nextState.multiplier();
+        }
+
+        TrafficState nextState = new TrafficState(1.0 + centerLoad, now.plusSeconds(ThreadLocalRandom.current().nextLong(20, 46)));
+        trafficStates.put(driver.driverId(), nextState);
+        return nextState.multiplier();
+    }
+
+    private double speedKmh(SimulatedDriver driver, double trafficMultiplier) {
+        if (!driver.hasActiveRoute()) {
+            return 0.0;
+        }
+
+        return Math.max(14.0, ThreadLocalRandom.current().nextDouble(26.0, 40.0) / trafficMultiplier);
+    }
+
+    private long estimateDelaySeconds(SimulatedDriver driver, long currentEtaSeconds, Instant now) {
+        if (!driver.hasActiveRoute() || driver.promisedDeliveryAt() == null || driver.deliveryStatus() == DeliveryStatus.DELIVERED) {
+            return 0;
+        }
+
+        Instant projectedDeliveryTime = now.plusSeconds(currentEtaSeconds);
+        return Math.max(0, java.time.Duration.between(driver.promisedDeliveryAt(), projectedDeliveryTime).getSeconds());
     }
 
     private long estimateEtaSeconds(List<GeoPoint> route) {
@@ -335,6 +501,18 @@ public class DeliverySimulatorScheduler {
         }
 
         return Math.max(60, Math.round(distanceKm / AVERAGE_DELIVERY_SPEED_KMH * 3600));
+    }
+
+    private long estimateEtaSeconds(double distanceKm) {
+        return Math.max(1, Math.round(distanceKm / AVERAGE_DELIVERY_SPEED_KMH * 3600));
+    }
+
+    private long estimateEtaSeconds(double distanceKm, double speedKmh) {
+        if (speedKmh <= 0) {
+            return 0;
+        }
+
+        return Math.max(1, Math.round(distanceKm / speedKmh * 3600));
     }
 
     private GeoPoint randomDistantDestination(double startLat, double startLng) {
@@ -394,5 +572,11 @@ public class DeliverySimulatorScheduler {
 
     private double snapToGrid(double coordinate) {
         return Math.round(coordinate / STREET_GRID_DEGREES) * STREET_GRID_DEGREES;
+    }
+
+    private record PickupPoint(String name, GeoPoint location) {
+    }
+
+    private record TrafficState(double multiplier, Instant expiresAt) {
     }
 }

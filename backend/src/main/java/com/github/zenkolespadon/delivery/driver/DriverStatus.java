@@ -7,5 +7,6 @@ public enum DriverStatus {
     ON_BREAK,
     DELAYED,
     STOPPED,
-    OFFLINE
+    OFFLINE,
+    FINISHED
 }

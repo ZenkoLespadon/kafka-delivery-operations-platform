@@ -4,6 +4,7 @@ import com.github.zenkolespadon.delivery.delivery.DeliveryStatus;
 import com.github.zenkolespadon.delivery.driver.DriverStatus;
 import com.github.zenkolespadon.delivery.event.GeoPoint;
 import com.github.zenkolespadon.delivery.event.GpsEvent;
+import com.github.zenkolespadon.delivery.parcel.ParcelStatus;
 import com.github.zenkolespadon.delivery.simulator.GpsEventProducer;
 import com.github.zenkolespadon.delivery.tracking.DriverPositionRepository;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -134,6 +135,7 @@ class DeliveryBackendIntegrationTest {
                 eventId,
                 "driver_test",
                 "delivery_test",
+                "parcel_test",
                 43.6045,
                 1.4440,
                 43.6045,
@@ -141,12 +143,25 @@ class DeliveryBackendIntegrationTest {
                 43.6100,
                 1.4500,
                 pickup,
+                "Test Pickup",
                 dropoff,
                 List.of(pickup, dropoff),
                 "TEST",
                 DeliveryStatus.ASSIGNED,
+                ParcelStatus.ASSIGNED,
                 300,
                 240,
+                0,
+                0,
+                false,
+                1.0,
+                10,
+                8,
+                1,
+                1,
+                3,
+                2,
+                900,
                 10.0,
                 32.0,
                 DriverStatus.DRIVING,

@@ -17,5 +17,7 @@ export function getDriverStatusColor(status: DriverStatus): string {
             return "#ef4444";
         case "OFFLINE":
             return "#111827";
+        case "FINISHED":
+            return "#64748b";
     }
 }

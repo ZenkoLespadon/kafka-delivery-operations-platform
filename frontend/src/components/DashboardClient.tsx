@@ -14,15 +14,16 @@ const DriverMap = dynamic(
     { ssr: false }
 );
 
-type SortMode = "index" | "progress-desc" | "progress-asc" | "speed-desc" | "status" | "updated-desc";
+type SortMode = "index" | "progress-desc" | "progress-asc" | "delay-desc" | "speed-desc" | "status" | "updated-desc";
 
 const SORT_OPTIONS: { value: SortMode; label: string }[] = [
-    { value: "index", label: "Indice" },
-    { value: "progress-desc", label: "Arrivee %" },
-    { value: "progress-asc", label: "Depart %" },
-    { value: "speed-desc", label: "Vitesse" },
-    { value: "status", label: "Statut" },
-    { value: "updated-desc", label: "Derniere maj" }
+    { value: "index", label: "Driver index" },
+    { value: "progress-desc", label: "Highest progress" },
+    { value: "progress-asc", label: "Lowest progress" },
+    { value: "delay-desc", label: "Current delay" },
+    { value: "speed-desc", label: "Speed" },
+    { value: "status", label: "Status" },
+    { value: "updated-desc", label: "Last update" }
 ];
 
 export function DashboardClient() {
@@ -31,10 +32,21 @@ export function DashboardClient() {
     const [connected, setConnected] = useState(false);
     const [lastUpdate, setLastUpdate] = useState<string | null>(null);
     const [sortMode, setSortMode] = useState<SortMode>("index");
+    const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
 
     const sortedDrivers = useMemo(() => {
-        return [...drivers].sort((a, b) => compareDrivers(a, b, sortMode));
-    }, [drivers, sortMode]);
+        return [...drivers].sort((a, b) => compareDriversWithSelection(a, b, sortMode, selectedDriverId));
+    }, [drivers, sortMode, selectedDriverId]);
+    const operationStats = useMemo(() => {
+        if (drivers.length === 0) {
+            return null;
+        }
+
+        return drivers.reduce(
+            (latest, driver) => Date.parse(driver.eventTimestamp) > Date.parse(latest.eventTimestamp) ? driver : latest,
+            drivers[0]
+        );
+    }, [drivers]);
 
     useEffect(() => {
         const abortController = new AbortController();
@@ -93,10 +105,14 @@ export function DashboardClient() {
         setTrails((currentTrails) => mergeTrails(currentTrails, payload));
     }
 
+    function toggleSelectedDriver(driverId: string) {
+        setSelectedDriverId((currentDriverId) => currentDriverId === driverId ? null : driverId);
+    }
+
     return (
         <main className="dashboard">
             <section className="map-panel">
-                <DriverMap drivers={sortedDrivers} trails={trails} />
+                <DriverMap drivers={sortedDrivers} trails={trails} selectedDriverId={selectedDriverId} />
             </section>
 
             <aside className="side-panel">
@@ -106,6 +122,14 @@ export function DashboardClient() {
                         {connected ? "WebSocket connected" : "WebSocket disconnected"}
                     </p>
                     <p className="meta">Drivers: {drivers.length}</p>
+                    {operationStats && (
+                        <div className="operation-summary" aria-label="Parcel operation summary">
+                            <span>Parcels: {operationStats.deliveredParcels}/{operationStats.totalParcels} delivered</span>
+                            <span>Active: {operationStats.activeParcels}</span>
+                            <span>Waiting: {operationStats.pendingParcels}</span>
+                            <span>Finish ETA: {formatEta(operationStats.estimatedOperationEtaSeconds)}</span>
+                        </div>
+                    )}
                     <p className="meta">Last update: {lastUpdate ?? "none"}</p>
                 </header>
 
@@ -126,7 +150,20 @@ export function DashboardClient() {
 
                 <section className="driver-list">
                     {sortedDrivers.map((driver) => (
-                        <article key={driver.driverId} className="driver-card">
+                        <article
+                            key={driver.driverId}
+                            className={driverCardClassName(driver, selectedDriverId)}
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={selectedDriverId === driver.driverId}
+                            onClick={() => toggleSelectedDriver(driver.driverId)}
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    toggleSelectedDriver(driver.driverId);
+                                }
+                            }}
+                        >
                             <div className="driver-card-header">
                                 <span
                                     className="driver-swatch"
@@ -160,6 +197,23 @@ export function DashboardClient() {
                                     <dd>{driver.sequenceNumber}</dd>
                                 </div>
                                 <div>
+                                    <dt>Parcel</dt>
+                                    <dd>
+                                        {driver.parcelId ?? "none"}
+                                        <span className="parcel-count">
+                                            {driver.driverDeliveredParcels}/{driver.driverAssignedParcels}
+                                        </span>
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>Parcel status</dt>
+                                    <dd>{driver.parcelStatus ?? "none"}</dd>
+                                </div>
+                                <div>
+                                    <dt>Pickup point</dt>
+                                    <dd>{driver.pickupName ?? "none"}</dd>
+                                </div>
+                                <div>
                                     <dt>Delivery</dt>
                                     <dd>{driver.deliveryId ?? "none"}</dd>
                                 </div>
@@ -174,6 +228,16 @@ export function DashboardClient() {
                                 <div>
                                     <dt>Current ETA</dt>
                                     <dd>{formatEta(driver.currentEtaSeconds)}</dd>
+                                </div>
+                                <div>
+                                    <dt>Current delay</dt>
+                                    <dd className={delayTextClassName(driver.delaySeconds)}>
+                                        {formatDelay(driver.delaySeconds)}
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>Traffic</dt>
+                                    <dd>x{driver.trafficMultiplier.toFixed(2)}</dd>
                                 </div>
                                 <div>
                                     <dt>Route</dt>
@@ -208,6 +272,48 @@ export function DashboardClient() {
     );
 }
 
+function driverCardClassName(driver: DriverLiveState, selectedDriverId: string | null) {
+    const classes = ["driver-card"];
+
+    const delayLevel = getDelayLevel(driver.delaySeconds);
+
+    if (delayLevel !== "none") {
+        classes.push(`delay-${delayLevel}`);
+    }
+
+    if (driver.driverId === selectedDriverId) {
+        classes.push("selected");
+    }
+
+    return classes.join(" ");
+}
+
+function delayTextClassName(delaySeconds: number) {
+    const delayLevel = getDelayLevel(delaySeconds);
+
+    if (delayLevel === "warning") {
+        return "warning-text";
+    }
+
+    if (delayLevel === "danger") {
+        return "danger-text";
+    }
+
+    return undefined;
+}
+
+function getDelayLevel(delaySeconds: number) {
+    if (delaySeconds > 300) {
+        return "danger";
+    }
+
+    if (delaySeconds > 0) {
+        return "warning";
+    }
+
+    return "none";
+}
+
 function formatPoint(point: { lat: number; lng: number } | null) {
     if (!point) {
         return "none";
@@ -224,12 +330,37 @@ function formatEta(seconds: number) {
     return `${Math.round(seconds / 60)} min`;
 }
 
+function formatDelay(seconds: number) {
+    return `${Math.round(seconds / 60)} min`;
+}
+
+function compareDriversWithSelection(
+    a: DriverLiveState,
+    b: DriverLiveState,
+    sortMode: SortMode,
+    selectedDriverId: string | null
+) {
+    if (selectedDriverId) {
+        if (a.driverId === selectedDriverId) {
+            return -1;
+        }
+
+        if (b.driverId === selectedDriverId) {
+            return 1;
+        }
+    }
+
+    return compareDrivers(a, b, sortMode);
+}
+
 function compareDrivers(a: DriverLiveState, b: DriverLiveState, sortMode: SortMode) {
     switch (sortMode) {
         case "progress-desc":
             return b.progressPercent - a.progressPercent || getDriverIndex(a.driverId) - getDriverIndex(b.driverId);
         case "progress-asc":
             return a.progressPercent - b.progressPercent || getDriverIndex(a.driverId) - getDriverIndex(b.driverId);
+        case "delay-desc":
+            return b.delaySeconds - a.delaySeconds || getDriverIndex(a.driverId) - getDriverIndex(b.driverId);
         case "speed-desc":
             return b.speedKmh - a.speedKmh || getDriverIndex(a.driverId) - getDriverIndex(b.driverId);
         case "status":

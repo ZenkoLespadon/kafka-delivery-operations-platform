@@ -60,6 +60,19 @@ body {
     font-size: 14px;
 }
 
+.operation-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 10px;
+    margin: 12px 0;
+    padding: 10px;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    background: #0f172a;
+    color: #cbd5e1;
+    font-size: 13px;
+}
+
 .toolbar {
     display: grid;
     grid-template-columns: auto 1fr;
@@ -97,6 +110,43 @@ body {
     border-radius: 8px;
     background: #0f172a;
     font-size: 14px;
+    cursor: pointer;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.driver-card:hover {
+    border-color: #64748b;
+}
+
+.driver-card:focus-visible {
+    outline: 2px solid #38bdf8;
+    outline-offset: 2px;
+}
+
+.driver-card.delay-warning {
+    border-color: #facc15;
+    box-shadow: inset 3px 0 0 #facc15;
+}
+
+.driver-card.delay-danger {
+    border-color: #ef4444;
+    box-shadow: inset 3px 0 0 #ef4444;
+}
+
+.driver-card.selected {
+    border-width: 3px;
+    border-color: #f8fafc;
+    box-shadow: inset 5px 0 0 #f8fafc, 0 0 0 1px rgba(148, 163, 184, 0.35);
+}
+
+.driver-card.delay-warning.selected {
+    border-color: #facc15;
+    box-shadow: inset 5px 0 0 #facc15, 0 0 0 1px rgba(250, 204, 21, 0.45);
+}
+
+.driver-card.delay-danger.selected {
+    border-color: #ef4444;
+    box-shadow: inset 5px 0 0 #ef4444, 0 0 0 1px rgba(248, 113, 113, 0.45);
 }
 
 .driver-card-header {
@@ -168,6 +218,20 @@ body {
     color: #cbd5e1;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.danger-text {
+    color: #fca5a5;
+}
+
+.warning-text {
+    color: #fde68a;
+}
+
+.parcel-count {
+    margin-left: 6px;
+    color: #94a3b8;
+    font-size: 12px;
 }
 
 .popup {

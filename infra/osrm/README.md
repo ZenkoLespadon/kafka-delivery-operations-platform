@@ -21,7 +21,7 @@ On Windows PowerShell:
 Then start the stack with OSRM:
 
 ```bash
-docker compose --profile routing up --build
+docker compose up -d --build
 ```
 
 Without prepared OSRM files, the backend falls back to simulated multi-segment routes.

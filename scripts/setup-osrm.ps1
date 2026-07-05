@@ -27,4 +27,4 @@ docker run --rm -t -v "${dataDir}:/data" osrm/osrm-backend:latest `
     osrm-customize /data/toulouse.osrm
 
 Write-Host "OSRM data ready. Start with:"
-Write-Host "docker compose --profile routing up --build"
+Write-Host "docker compose up -d --build"

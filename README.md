@@ -29,6 +29,26 @@ The system generates drivers and parcels, dispatches deliveries, streams GPS eve
   - yellow: delay between 0 and 5 minutes;
   - red: delay over 5 minutes.
 
+## Screenshots
+
+### Real-Time Map With Kafka Activity
+
+![Real-time delivery map with Kafka Activity and Streams Alerts](docs/screenshots/map-kafka-activity-stream-alerts.png)
+
+The main dashboard shows live driver positions on a Leaflet map, pickup markers, road-based routes, and the Kafka monitoring panel. `Kafka Activity` exposes event throughput and topic activity, while `Streams Alerts` shows delay alerts produced by the Kafka Streams aggregation topology.
+
+### Driver Ranking By Projected Delay
+
+![Driver list ranked by projected delay](docs/screenshots/drivers-projected-delay-ranking.png)
+
+Drivers can be sorted by operational criteria such as projected delay, progress, speed, status, or last update. The compact driver list keeps the dashboard readable while still showing each driver's parcel status and delivery progress.
+
+### Expanded Driver Details
+
+![Expanded driver detail panel](docs/screenshots/driver-detail-panel.png)
+
+Clicking a driver expands the card with detailed live state: speed, active parcel, pickup point, delivery status, initial estimate, remaining time, projected delay, position, pickup/dropoff coordinates, destination, and last update time. The same click also focuses the map on that driver.
+
 ## Architecture
 
 ```mermaid
@@ -399,7 +419,6 @@ docker compose build backend frontend
 - Prometheus is exposed by the backend, but Grafana dashboards are not yet included.
 - Replay of a completed delivery is not implemented yet.
 - Assignment optimization is intentionally basic for the MVP.
-- The dashboard does not yet include screenshots in the repository.
 
 ## Possible Next Steps
 
@@ -407,5 +426,5 @@ docker compose build backend frontend
 - Add more Kafka Streams windows for out-of-order handling and cross-driver aggregate delay metrics.
 - Add replay by delivery id from persisted history or compacted Kafka events.
 - Add a real parcel detail page.
-- Add screenshots and a short demo video/GIF to the README.
+- Add a short demo video/GIF to the README.
 - Add CI for backend tests and frontend build.

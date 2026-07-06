@@ -6,7 +6,7 @@ The `osrm` Docker Compose service expects preprocessed OSRM files in this direct
 infra/osrm/data/toulouse.osrm
 ```
 
-Prepare data from a Toulouse-compatible `.osm.pbf` extract:
+Prepare data from a Midi-Pyrenees `.osm.pbf` extract:
 
 ```bash
 ./scripts/setup-osrm.sh

@@ -39,35 +39,39 @@ public class DeliverySimulatorScheduler {
     private static final int PARCELS_PER_CYCLE = 50;
     private static final List<GeoPoint> SPAWN_ANCHORS = List.of(
             new GeoPoint(43.6045, 1.4440),
-            new GeoPoint(43.6085, 1.4390),
-            new GeoPoint(43.6005, 1.4510),
-            new GeoPoint(43.6125, 1.4520),
-            new GeoPoint(43.5965, 1.4360),
-            new GeoPoint(43.6045, 1.4440),
-            new GeoPoint(43.6280, 1.4350),
-            new GeoPoint(43.5700, 1.4050),
-            new GeoPoint(43.6110, 1.4990),
-            new GeoPoint(43.5840, 1.3450)
+            new GeoPoint(43.6176, 1.4244),
+            new GeoPoint(43.6262, 1.4766),
+            new GeoPoint(43.5837, 1.4484),
+            new GeoPoint(43.5965, 1.4039),
+            new GeoPoint(43.6374, 1.3897),
+            new GeoPoint(43.5609, 1.4670),
+            new GeoPoint(43.6002, 1.4312),
+            new GeoPoint(43.6163, 1.4626),
+            new GeoPoint(43.5917, 1.4813)
     );
     private static final List<GeoPoint> ROUTE_ANCHORS = List.of(
-            new GeoPoint(43.6350, 1.3740),
-            new GeoPoint(43.6610, 1.4820),
-            new GeoPoint(43.6110, 1.4990),
-            new GeoPoint(43.5460, 1.4740),
-            new GeoPoint(43.5840, 1.3450),
+            new GeoPoint(43.6374, 1.3897),
+            new GeoPoint(43.6262, 1.4766),
+            new GeoPoint(43.5609, 1.4670),
+            new GeoPoint(43.5965, 1.4039),
+            new GeoPoint(43.5837, 1.4484),
             new GeoPoint(43.6045, 1.4440),
-            new GeoPoint(43.5700, 1.4050),
-            new GeoPoint(43.6280, 1.4350),
-            new GeoPoint(43.6000, 1.5200),
-            new GeoPoint(43.6500, 1.4100)
+            new GeoPoint(43.6176, 1.4244),
+            new GeoPoint(43.6002, 1.4312),
+            new GeoPoint(43.5917, 1.4813),
+            new GeoPoint(43.6163, 1.4626)
     );
     private static final List<PickupPoint> PICKUP_POINTS = List.of(
             new PickupPoint("Capitole Hub", new GeoPoint(43.6045, 1.4440)),
-            new PickupPoint("Jean Jaures Locker", new GeoPoint(43.6059, 1.4494)),
-            new PickupPoint("Saint-Cyprien Store", new GeoPoint(43.5987, 1.4319)),
-            new PickupPoint("Matabiau Depot", new GeoPoint(43.6115, 1.4537)),
-            new PickupPoint("Carmes Counter", new GeoPoint(43.5991, 1.4458)),
-            new PickupPoint("Compans Pickup", new GeoPoint(43.6119, 1.4358))
+            new PickupPoint("Compans Store", new GeoPoint(43.6111, 1.4344)),
+            new PickupPoint("Minimes Locker", new GeoPoint(43.6242, 1.4358)),
+            new PickupPoint("Jolimont Pickup", new GeoPoint(43.6163, 1.4626)),
+            new PickupPoint("Balma Parcel Point", new GeoPoint(43.6136, 1.5007)),
+            new PickupPoint("Rangueil Depot", new GeoPoint(43.5609, 1.4670)),
+            new PickupPoint("Saint-Cyprien Hub", new GeoPoint(43.5970, 1.4254)),
+            new PickupPoint("Purpan Locker", new GeoPoint(43.6131, 1.3976)),
+            new PickupPoint("Blagnac Pickup", new GeoPoint(43.6374, 1.3897)),
+            new PickupPoint("Cote Pavee Pickup", new GeoPoint(43.5917, 1.4813))
     );
 
     private final DeliverySimulationProperties properties;
@@ -368,8 +372,7 @@ public class DeliverySimulatorScheduler {
         ));
     }
 
-    private SimulatedDelivery createDelivery(int parcelNumber) {
-        PickupPoint pickupPoint = PICKUP_POINTS.get(ThreadLocalRandom.current().nextInt(PICKUP_POINTS.size()));
+    private SimulatedDelivery createDelivery(int parcelNumber, PickupPoint pickupPoint) {
         GeoPoint pickup = randomPointNear(pickupPoint.location(), 0.25);
         GeoPoint dropoff = randomDistantDestination(pickup.lat(), pickup.lng());
 
@@ -400,8 +403,10 @@ public class DeliverySimulatorScheduler {
         }
 
         for (int i = 0; i < PARCELS_PER_CYCLE; i++) {
-            SimulatedDelivery delivery = createDelivery(i + 1);
-            deliveriesByDriver.get(i % drivers.size()).add(delivery);
+            int driverIndex = i % drivers.size();
+            int pickupIndex = (driverIndex + (i / drivers.size()) * 3 + cycleNumber - 1) % PICKUP_POINTS.size();
+            SimulatedDelivery delivery = createDelivery(i + 1, PICKUP_POINTS.get(pickupIndex));
+            deliveriesByDriver.get(driverIndex).add(delivery);
         }
 
         for (int i = 0; i < drivers.size(); i++) {

@@ -20,7 +20,7 @@ const SORT_OPTIONS: { value: SortMode; label: string }[] = [
     { value: "index", label: "Driver index" },
     { value: "progress-desc", label: "Highest progress" },
     { value: "progress-asc", label: "Lowest progress" },
-    { value: "delay-desc", label: "Current delay" },
+    { value: "delay-desc", label: "Projected delay" },
     { value: "speed-desc", label: "Speed" },
     { value: "status", label: "Status" },
     { value: "updated-desc", label: "Last update" }
@@ -35,6 +35,7 @@ export function DashboardClient() {
     const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
     const [kafkaActivity, setKafkaActivity] = useState<KafkaActivity | null>(null);
     const [alerts, setAlerts] = useState<DeliveryAlert[]>([]);
+    const [kafkaPanelCollapsed, setKafkaPanelCollapsed] = useState(false);
 
     const sortedDrivers = useMemo(() => {
         return [...drivers].sort((a, b) => compareDriversWithSelection(a, b, sortMode, selectedDriverId));
@@ -145,7 +146,7 @@ export function DashboardClient() {
                             <span>Parcels: {operationStats.deliveredParcels}/{operationStats.totalParcels} delivered</span>
                             <span>Active: {operationStats.activeParcels}</span>
                             <span>Waiting: {operationStats.pendingParcels}</span>
-                            <span>Finish ETA: {formatEta(operationStats.estimatedOperationEtaSeconds)}</span>
+                            <span>Operation remaining time: {formatEta(operationStats.estimatedOperationEtaSeconds)}</span>
                         </div>
                     )}
                     <p className="meta">Last update: {lastUpdate ?? "none"}</p>
@@ -166,64 +167,79 @@ export function DashboardClient() {
                     </select>
                 </div>
 
-                <section className="kafka-panel" aria-label="Kafka activity">
-                    <div className="panel-title-row">
-                        <h2>Kafka Activity</h2>
-                        <span>{kafkaActivity ? `${kafkaActivity.gpsEventsPerSecond.toFixed(1)} GPS/s` : "waiting"}</span>
-                    </div>
+                <section className="kafka-panel" aria-label="Kafka activity and stream alerts">
+                    <button
+                        type="button"
+                        className="panel-toggle-row"
+                        aria-expanded={!kafkaPanelCollapsed}
+                        onClick={() => setKafkaPanelCollapsed((collapsed) => !collapsed)}
+                    >
+                        <span>Kafka Activity / Stream Alerts</span>
+                        <span>
+                            {kafkaActivity ? `${kafkaActivity.gpsEventsPerSecond.toFixed(1)} GPS/s` : "waiting"}
+                            {" | "}
+                            {alerts.length} alerts
+                            {" | "}
+                            {kafkaPanelCollapsed ? "show" : "hide"}
+                        </span>
+                    </button>
 
-                    <dl className="kafka-metrics">
-                        <div>
-                            <dt>GPS produced</dt>
-                            <dd>{kafkaActivity?.gpsEventsProduced ?? 0}</dd>
-                        </div>
-                        <div>
-                            <dt>GPS consumed</dt>
-                            <dd>{kafkaActivity?.gpsEventsConsumed ?? 0}</dd>
-                        </div>
-                        <div>
-                            <dt>Assignments</dt>
-                            <dd>{kafkaActivity?.deliveryEventsProduced ?? 0}</dd>
-                        </div>
-                        <div>
-                            <dt>ETA events</dt>
-                            <dd>{kafkaActivity?.etaEventsProduced ?? 0}</dd>
-                        </div>
-                        <div>
-                            <dt>Geofence</dt>
-                            <dd>{kafkaActivity?.geofenceEventsProduced ?? 0}</dd>
-                        </div>
-                        <div>
-                            <dt>DLQ</dt>
-                            <dd className={(kafkaActivity?.deadLetterEventsProduced ?? 0) > 0 ? "danger-text" : undefined}>
-                                {kafkaActivity?.deadLetterEventsProduced ?? 0}
-                            </dd>
-                        </div>
-                    </dl>
+                    {!kafkaPanelCollapsed && (
+                        <>
+                            <dl className="kafka-metrics">
+                                <div>
+                                    <dt>GPS produced</dt>
+                                    <dd>{kafkaActivity?.gpsEventsProduced ?? 0}</dd>
+                                </div>
+                                <div>
+                                    <dt>GPS consumed</dt>
+                                    <dd>{kafkaActivity?.gpsEventsConsumed ?? 0}</dd>
+                                </div>
+                                <div>
+                                    <dt>Assignments</dt>
+                                    <dd>{kafkaActivity?.deliveryEventsProduced ?? 0}</dd>
+                                </div>
+                                <div>
+                                    <dt>Estimate events</dt>
+                                    <dd>{kafkaActivity?.etaEventsProduced ?? 0}</dd>
+                                </div>
+                                <div>
+                                    <dt>Geofence</dt>
+                                    <dd>{kafkaActivity?.geofenceEventsProduced ?? 0}</dd>
+                                </div>
+                                <div>
+                                    <dt>DLQ</dt>
+                                    <dd className={(kafkaActivity?.deadLetterEventsProduced ?? 0) > 0 ? "danger-text" : undefined}>
+                                        {kafkaActivity?.deadLetterEventsProduced ?? 0}
+                                    </dd>
+                                </div>
+                            </dl>
 
-                    <div className="topic-strip" aria-label="Recently touched Kafka topics">
-                        {(kafkaActivity?.recentlyTouchedTopics ?? []).map((topic) => (
-                            <span key={topic}>{topic}</span>
-                        ))}
-                    </div>
+                            <div className="topic-strip" aria-label="Recently touched Kafka topics">
+                                {(kafkaActivity?.recentlyTouchedTopics ?? []).map((topic) => (
+                                    <span key={topic}>{topic}</span>
+                                ))}
+                            </div>
 
-                    <div className="alert-feed" aria-label="Kafka Streams delay alerts">
-                        <div className="panel-title-row">
-                            <h3>Streams Alerts</h3>
-                            <span>{alerts.length}</span>
-                        </div>
-                        {alerts.length === 0 ? (
-                            <p className="empty-feed">No aggregated delay alert yet</p>
-                        ) : (
-                            alerts.slice(0, 4).map((alert) => (
-                                <article key={alert.eventId} className={`alert-item ${alert.severity.toLowerCase()}`}>
-                                    <strong>{alert.severity} {alert.alertType}</strong>
-                                    <span>{alert.driverId ?? "all drivers"}</span>
-                                    <p>{alert.message}</p>
-                                </article>
-                            ))
-                        )}
-                    </div>
+                            <div className="alert-feed" aria-label="Kafka Streams delay alerts">
+                                <div className="panel-title-row">
+                                    <h3>Streams Alerts</h3>
+                                    <span>{alerts.length}</span>
+                                </div>
+                                {alerts.length === 0 ? (
+                                    <p className="empty-feed">No aggregated delay alert yet</p>
+                                ) : (
+                                    alerts.slice(0, 4).map((alert) => (
+                                        <article key={alert.eventId} className={`alert-item ${alert.severity.toLowerCase()}`}>
+                                            <strong>{alert.severity} {alert.alertType}</strong>
+                                            <span>{alert.driverId ?? "all drivers"}</span>
+                                            <p>{alert.message}</p>
+                                        </article>
+                                    ))
+                                )}
+                            </div>
+                        </>
+                    )}
                 </section>
 
                 <section className="driver-list">
@@ -234,6 +250,7 @@ export function DashboardClient() {
                             role="button"
                             tabIndex={0}
                             aria-pressed={selectedDriverId === driver.driverId}
+                            aria-expanded={selectedDriverId === driver.driverId}
                             onClick={() => toggleSelectedDriver(driver.driverId)}
                             onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === " ") {
@@ -242,14 +259,17 @@ export function DashboardClient() {
                                 }
                             }}
                         >
-                            <div className="driver-card-header">
+                            <div className="driver-summary-header">
                                 <span
                                     className="driver-swatch"
                                     style={{ backgroundColor: getDriverColor(driver.driverId) }}
                                     aria-hidden="true"
                                 />
-                                <strong>#{getReadableDriverIndex(driver.driverId)} {driver.driverId}</strong>
-                                <span className="driver-status">{driver.status}</span>
+                                <div className="driver-identity">
+                                    <strong>{driver.driverId}</strong>
+                                    <span>Driver #{getReadableDriverIndex(driver.driverId)}</span>
+                                </div>
+                                <span className="driver-status">{driver.parcelStatus ?? "none"}</span>
                             </div>
 
                             <div className="progress-row">
@@ -265,14 +285,11 @@ export function DashboardClient() {
                                 <strong>{driver.progressPercent.toFixed(1)}%</strong>
                             </div>
 
+                            {selectedDriverId === driver.driverId && (
                             <dl className="driver-metrics">
                                 <div>
                                     <dt>Speed</dt>
                                     <dd>{driver.speedKmh.toFixed(1)} km/h</dd>
-                                </div>
-                                <div>
-                                    <dt>Seq</dt>
-                                    <dd>{driver.sequenceNumber}</dd>
                                 </div>
                                 <div>
                                     <dt>Parcel</dt>
@@ -282,6 +299,10 @@ export function DashboardClient() {
                                             {driver.driverDeliveredParcels}/{driver.driverAssignedParcels}
                                         </span>
                                     </dd>
+                                </div>
+                                <div>
+                                    <dt>Driver status</dt>
+                                    <dd>{driver.status}</dd>
                                 </div>
                                 <div>
                                     <dt>Parcel status</dt>
@@ -300,26 +321,18 @@ export function DashboardClient() {
                                     <dd>{driver.deliveryStatus ?? "none"}</dd>
                                 </div>
                                 <div>
-                                    <dt>Initial ETA</dt>
+                                    <dt>Initial estimate</dt>
                                     <dd>{formatEta(driver.initialEtaSeconds)}</dd>
                                 </div>
                                 <div>
-                                    <dt>Current ETA</dt>
+                                    <dt>Remaining time</dt>
                                     <dd>{formatEta(driver.currentEtaSeconds)}</dd>
                                 </div>
                                 <div>
-                                    <dt>Current delay</dt>
+                                    <dt>Projected delay</dt>
                                     <dd className={delayTextClassName(driver.delaySeconds)}>
                                         {formatDelay(driver.delaySeconds)}
                                     </dd>
-                                </div>
-                                <div>
-                                    <dt>Traffic</dt>
-                                    <dd>x{driver.trafficMultiplier.toFixed(2)}</dd>
-                                </div>
-                                <div>
-                                    <dt>Route</dt>
-                                    <dd>{driver.routeSource}</dd>
                                 </div>
                                 <div>
                                     <dt>Position</dt>
@@ -342,6 +355,7 @@ export function DashboardClient() {
                                     <dd>{new Date(driver.eventTimestamp).toLocaleTimeString()}</dd>
                                 </div>
                             </dl>
+                            )}
                         </article>
                     ))}
                 </section>

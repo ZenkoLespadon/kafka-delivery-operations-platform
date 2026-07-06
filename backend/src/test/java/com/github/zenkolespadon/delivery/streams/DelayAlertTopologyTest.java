@@ -116,7 +116,7 @@ class DelayAlertTopologyTest {
 
     private GpsEvent gpsEvent(String eventId, String driverId, long delaySeconds, Instant eventTimestamp, long sequenceNumber) {
         GeoPoint pickup = new GeoPoint(43.6045, 1.4440);
-        GeoPoint dropoff = new GeoPoint(43.6100, 1.4500);
+        GeoPoint dropoff = new GeoPoint(43.6100, 1.4700);
 
         return new GpsEvent(
                 eventId,
@@ -128,7 +128,7 @@ class DelayAlertTopologyTest {
                 43.6045,
                 1.4440,
                 43.6100,
-                1.4500,
+                1.4700,
                 pickup,
                 "Test Pickup",
                 dropoff,

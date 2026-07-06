@@ -24,7 +24,7 @@ export function DriverMap({ drivers, trails, selectedDriverId }: DriverMapProps)
 
     return (
         <MapContainer
-            center={[43.6045, 1.444]}
+            center={[43.6045, 1.4440]}
             zoom={12}
             scrollWheelZoom
             className="driver-map"
@@ -98,13 +98,11 @@ export function DriverMap({ drivers, trails, selectedDriverId }: DriverMapProps)
                                     <span>Parcel status: {driver.parcelStatus ?? "none"}</span>
                                     <span>Delivery: {driver.deliveryId ?? "none"}</span>
                                     <span>Delivery status: {driver.deliveryStatus ?? "none"}</span>
-                                    <span>Delay: {formatDelay(driver.delaySeconds)}</span>
-                                    <span>Route: {driver.routeSource}</span>
-                                    <span>Initial ETA: {formatEta(driver.initialEtaSeconds)}</span>
-                                    <span>Current ETA: {formatEta(driver.currentEtaSeconds)}</span>
+                                    <span>Projected delay: {formatDelay(driver.delaySeconds)}</span>
+                                    <span>Initial estimate: {formatEta(driver.initialEtaSeconds)}</span>
+                                    <span>Remaining time: {formatEta(driver.currentEtaSeconds)}</span>
                                     <span>Progress: {driver.progressPercent.toFixed(1)}%</span>
                                     <span>Speed: {driver.speedKmh.toFixed(1)} km/h</span>
-                                    <span>Seq: {driver.sequenceNumber}</span>
                                     <span>{new Date(driver.eventTimestamp).toLocaleTimeString()}</span>
                                 </div>
                             </Popup>
@@ -128,7 +126,7 @@ function SelectedDriverFocus({
     useEffect(() => {
         if (!driver) {
             if (selectedDriverId === null) {
-                map.flyTo([43.6045, 1.444], 12, {
+                map.flyTo([43.6045, 1.4440], 12, {
                     animate: true,
                     duration: 0.65
                 });

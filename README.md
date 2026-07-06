@@ -1,6 +1,6 @@
 # Kafka Real-Time Delivery Operations Platform
 
-Backend/event-driven portfolio project that simulates a same-day delivery operation in Toulouse.
+Backend/event-driven portfolio project that simulates a same-day delivery operation in Toulouse, France.
 
 The system generates drivers and parcels, dispatches deliveries, streams GPS events through Kafka, stores live state in Redis, persists position history in PostgreSQL/PostGIS, and exposes a real-time dashboard with Leaflet and WebSocket updates.
 

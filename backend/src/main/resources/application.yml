@@ -30,6 +30,7 @@ spring:
     streams:
       application-id: delivery-delay-alert-stream
       properties:
+        default.key.serde: org.apache.kafka.common.serialization.Serdes$StringSerde
         statestore.cache.max.bytes: 0
         commit.interval.ms: 1000
 

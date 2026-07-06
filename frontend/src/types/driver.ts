@@ -45,6 +45,29 @@ export type DriverLiveState = {
     sequenceNumber: number;
 };
 
+export type KafkaActivity = {
+    gpsEventsProduced: number;
+    gpsEventsConsumed: number;
+    deliveryEventsProduced: number;
+    etaEventsProduced: number;
+    geofenceEventsProduced: number;
+    deliveryAlertsConsumed: number;
+    deadLetterEventsProduced: number;
+    gpsEventsPerSecond: number;
+    recentlyTouchedTopics: string[];
+    measuredAt: string;
+};
+
+export type DeliveryAlert = {
+    eventId: string;
+    alertType: string;
+    driverId: string | null;
+    deliveryId: string | null;
+    message: string;
+    severity: "INFO" | "WARNING" | "CRITICAL";
+    eventTimestamp: string;
+};
+
 export type GeoPoint = {
     lat: number;
     lng: number;

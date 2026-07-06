@@ -96,6 +96,123 @@ body {
     font: inherit;
 }
 
+.kafka-panel {
+    display: grid;
+    gap: 10px;
+    margin-top: 16px;
+    padding: 12px;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    background: #0b1120;
+}
+
+.panel-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.panel-title-row h2,
+.panel-title-row h3 {
+    margin: 0;
+    font-size: 14px;
+}
+
+.panel-title-row span {
+    color: #38bdf8;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.kafka-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin: 0;
+}
+
+.kafka-metrics div {
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+    background: #0f172a;
+}
+
+.kafka-metrics dt {
+    margin: 0 0 4px;
+    color: #94a3b8;
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+.kafka-metrics dd {
+    margin: 0;
+    color: #e5e7eb;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.topic-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.topic-strip span {
+    padding: 4px 7px;
+    border: 1px solid #334155;
+    border-radius: 9999px;
+    background: #020617;
+    color: #cbd5e1;
+    font-size: 11px;
+}
+
+.alert-feed {
+    display: grid;
+    gap: 8px;
+}
+
+.empty-feed {
+    margin: 0;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.alert-item {
+    display: grid;
+    gap: 3px;
+    padding: 8px;
+    border-left: 3px solid #38bdf8;
+    border-radius: 6px;
+    background: #0f172a;
+}
+
+.alert-item.warning {
+    border-left-color: #facc15;
+}
+
+.alert-item.critical {
+    border-left-color: #ef4444;
+}
+
+.alert-item strong {
+    font-size: 12px;
+}
+
+.alert-item span {
+    color: #94a3b8;
+    font-size: 11px;
+}
+
+.alert-item p {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
 .driver-list {
     display: grid;
     gap: 8px;

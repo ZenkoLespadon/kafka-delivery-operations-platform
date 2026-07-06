@@ -37,7 +37,8 @@ import static org.awaitility.Awaitility.await;
 @Testcontainers
 @SpringBootTest(properties = {
         "app.simulation.enabled=false",
-        "app.routing.osrm-enabled=false"
+        "app.routing.osrm-enabled=false",
+        "spring.kafka.streams.auto-startup=false"
 })
 class DeliveryBackendIntegrationTest {
 
@@ -127,13 +128,17 @@ class DeliveryBackendIntegrationTest {
     }
 
     private GpsEvent gpsEvent(String eventId) {
+        return gpsEvent(eventId, "driver_test", 0, Instant.now(), 1);
+    }
+
+    private GpsEvent gpsEvent(String eventId, String driverId, long delaySeconds, Instant eventTimestamp, long sequenceNumber) {
         Instant now = Instant.now();
         GeoPoint pickup = new GeoPoint(43.6045, 1.4440);
         GeoPoint dropoff = new GeoPoint(43.6100, 1.4500);
 
         return new GpsEvent(
                 eventId,
-                "driver_test",
+                driverId,
                 "delivery_test",
                 "parcel_test",
                 43.6045,
@@ -151,9 +156,9 @@ class DeliveryBackendIntegrationTest {
                 ParcelStatus.ASSIGNED,
                 300,
                 240,
+                delaySeconds,
                 0,
-                0,
-                false,
+                delaySeconds > 0,
                 1.0,
                 10,
                 8,
@@ -164,10 +169,10 @@ class DeliveryBackendIntegrationTest {
                 900,
                 10.0,
                 32.0,
-                DriverStatus.DRIVING,
+                delaySeconds > 0 ? DriverStatus.DELAYED : DriverStatus.DRIVING,
+                eventTimestamp,
                 now,
-                now,
-                1
+                sequenceNumber
         );
     }
 }

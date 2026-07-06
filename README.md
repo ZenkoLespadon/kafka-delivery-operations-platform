@@ -7,6 +7,7 @@ The system generates drivers and parcels, dispatches deliveries, streams GPS eve
 ## What It Demonstrates
 
 - Event-driven backend design with Kafka topics and JSON events.
+- Kafka Streams delay-window aggregation on top of the raw GPS event stream.
 - Real-time state projection from Kafka events into Redis.
 - Geospatial history storage with PostgreSQL/PostGIS.
 - WebSocket push updates for a live operations dashboard.
@@ -35,6 +36,7 @@ flowchart LR
     Simulator[Delivery simulator<br/>Spring Boot scheduler]
     Kafka[(Kafka)]
     Tracking[Tracking service<br/>Spring Kafka consumer]
+    Streams[Kafka Streams<br/>delay window aggregation]
     Redis[(Redis<br/>live state)]
     Postgres[(PostgreSQL + PostGIS<br/>position history)]
     WS[WebSocket gateway<br/>Spring WebSocket]
@@ -47,6 +49,8 @@ flowchart LR
     Simulator -->|delivery-events| Kafka
     Simulator -->|eta-updated / geofence-events| Kafka
     Kafka --> Tracking
+    Kafka --> Streams
+    Streams -->|delivery-alerts| Kafka
     Tracking --> Redis
     Tracking --> Postgres
     Tracking -->|dead-letter-events| Kafka
@@ -63,6 +67,7 @@ flowchart LR
 | Backend | Java 21, Spring Boot, Spring Kafka, Spring WebSocket |
 | Frontend | TypeScript, Next.js, React, Leaflet |
 | Messaging | Kafka |
+| Stream processing | Kafka Streams |
 | Live state | Redis |
 | History | PostgreSQL, PostGIS, Hibernate Spatial |
 | Routing | OSRM |
@@ -211,21 +216,118 @@ limit 10;
 9. Confirm delay coloring:
    - yellow for delays up to 5 minutes;
    - red for delays over 5 minutes.
-10. Open Kafka UI and inspect `gps-events`, `delivery-events`, `eta-updated` and `geofence-events`.
-11. Query PostgreSQL to confirm position history is being persisted.
+10. Check the `Kafka Activity` panel in the dashboard.
+11. Confirm `gps-events` counters increase and recently touched topics update.
+12. Wait for a delayed driver and confirm a `Streams Alerts` item appears.
+13. Open Kafka UI and inspect `gps-events`, `delivery-events`, `eta-updated`, `geofence-events` and `delivery-alerts`.
+14. Query PostgreSQL to confirm position history is being persisted.
 
 ## Event Flow
 
 1. The simulator assigns parcels to drivers and publishes assignment events.
 2. Drivers move along OSRM routes or fallback multi-segment routes.
 3. GPS events are published to `gps-events`.
-4. The tracking consumer validates events.
+4. A Spring Kafka tracking consumer validates events.
 5. Invalid events go to `dead-letter-events`.
 6. Duplicate events are ignored using Redis `processed:event:{eventId}` keys.
 7. Out-of-order events are detected using each driver's last sequence/timestamp state.
 8. Valid events update Redis live state.
 9. Valid events are persisted to PostgreSQL/PostGIS.
-10. The dashboard receives live state through WebSocket broadcasts.
+10. A Kafka Streams topology consumes `gps-events`, groups delayed events by driver in one-minute windows, and publishes aggregated delay alerts to `delivery-alerts`.
+11. The dashboard receives live state through WebSocket broadcasts.
+
+## Kafka Architecture
+
+The demo is built around Kafka as the central event backbone. The backend deliberately keeps the service count small, but the internal boundaries still follow an event-driven model:
+
+| Topic | Producer | Consumer | Purpose |
+| --- | --- | --- | --- |
+| `gps-events` | Delivery simulator | Tracking consumer, Kafka Streams | Raw driver telemetry stream. |
+| `delivery-events` | Delivery simulator | Kafka UI / future services | Delivery assignment lifecycle events. |
+| `driver-events` | Reserved | Future services | Driver lifecycle events. |
+| `eta-updated` | Delivery simulator | Kafka UI / future services | ETA updates generated during movement. |
+| `geofence-events` | Delivery simulator | Kafka UI / future services | Pickup/dropoff arrival events. |
+| `delivery-alerts` | Kafka Streams | Dashboard alert consumer | Aggregated operational alerts. |
+| `dead-letter-events` | Tracking consumer | Kafka UI / future replay tooling | Invalid or rejected input events. |
+
+The dashboard exposes this Kafka activity directly:
+
+- GPS produced and consumed counters.
+- GPS events per second over the last 30 seconds.
+- Delivery assignment, ETA, geofence, alert and DLQ counters.
+- Recently touched Kafka topics.
+- Recent Kafka Streams alerts from `delivery-alerts`.
+
+## Kafka Streams Topology
+
+The project includes a focused Kafka Streams topology:
+
+```text
+gps-events
+  -> filter events with delaySeconds > 0
+  -> key by driverId
+  -> one-minute window aggregation
+  -> count delayed GPS events, max delay, average delay
+  -> publish DRIVER_DELAY_WINDOW alerts to delivery-alerts
+```
+
+Alert rules:
+
+- `WARNING`: at least 3 delayed GPS events for the same driver in a one-minute window.
+- `CRITICAL`: max delay reaches 5 minutes or more in the window.
+
+This keeps the stream processing scope small but meaningful: the raw telemetry stream is transformed into operational delay alerts without querying Redis or PostgreSQL.
+
+### Example Events
+
+`gps-events`:
+
+```json
+{
+  "eventId": "evt_001",
+  "driverId": "driver_4",
+  "deliveryId": "delivery_18",
+  "parcelId": "parcel_18",
+  "lat": 43.6045,
+  "lng": 1.444,
+  "speedKmh": 27.5,
+  "status": "DRIVING",
+  "deliveryStatus": "IN_TRANSIT",
+  "parcelStatus": "OUT_FOR_DELIVERY",
+  "currentEtaSeconds": 420,
+  "delaySeconds": 90,
+  "eventTimestamp": "2026-07-06T10:15:00Z",
+  "producedAt": "2026-07-06T10:15:01Z",
+  "sequenceNumber": 123
+}
+```
+
+`delivery-alerts`:
+
+```json
+{
+  "eventId": "delay-window-driver_4-1783332900000-3",
+  "alertType": "DRIVER_DELAY_WINDOW",
+  "driverId": "driver_4",
+  "deliveryId": "delivery_18",
+  "message": "Driver driver_4 accumulated 3 delayed GPS events in the last minute. Max delay=180 seconds, average delay=150 seconds",
+  "severity": "WARNING",
+  "eventTimestamp": "2026-07-06T10:16:00Z"
+}
+```
+
+`dead-letter-events`:
+
+```json
+{
+  "eventId": "dlq_001",
+  "originalEventId": "evt_invalid_001",
+  "sourceTopic": "gps-events",
+  "reason": "Invalid GPS coordinates",
+  "payload": "{...}",
+  "eventTimestamp": "2026-07-06T10:17:00Z"
+}
+```
 
 ## Data Model
 
@@ -245,7 +347,7 @@ Live Redis state contains the richer dashboard projection: parcel id, pickup/dro
 
 ## Tests
 
-Run backend integration tests with Docker/Testcontainers:
+Run backend tests with Docker/Testcontainers:
 
 ```bash
 docker run --rm \
@@ -271,6 +373,12 @@ docker run --rm `
   maven:3.9.9-eclipse-temurin-21 mvn -B test
 ```
 
+The test suite includes:
+
+- Kafka production/consumption integration test.
+- Kafka consumer projection test into PostgreSQL and Redis.
+- Kafka Streams topology tests from `gps-events` to `delivery-alerts` with `TopologyTestDriver`.
+
 Build the full application:
 
 ```bash
@@ -287,7 +395,7 @@ docker compose build backend frontend
 
 ## Known Limitations
 
-- Kafka Streams is not yet used for a full stateful stream topology. The current processing is implemented with Spring Kafka consumers.
+- Kafka Streams is intentionally limited to delay-window alert aggregation. Most state projection is still handled by Spring Kafka consumers for MVP simplicity.
 - Prometheus is exposed by the backend, but Grafana dashboards are not yet included.
 - Replay of a completed delivery is not implemented yet.
 - Assignment optimization is intentionally basic for the MVP.
@@ -296,7 +404,7 @@ docker compose build backend frontend
 ## Possible Next Steps
 
 - Add Grafana dashboards for event throughput, DLQ count and processing latency.
-- Add Kafka Streams windows for out-of-order handling and aggregate delay metrics.
+- Add more Kafka Streams windows for out-of-order handling and cross-driver aggregate delay metrics.
 - Add replay by delivery id from persisted history or compacted Kafka events.
 - Add a real parcel detail page.
 - Add screenshots and a short demo video/GIF to the README.

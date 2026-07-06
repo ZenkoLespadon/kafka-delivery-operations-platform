@@ -4,8 +4,8 @@ import dynamic from "next/dynamic";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import { useEffect, useMemo, useState } from "react";
-import type { DriverLiveState } from "@/types/driver";
-import { DRIVERS_LIVE_URL, WEBSOCKET_URL } from "@/lib/backend";
+import type { DeliveryAlert, DriverLiveState, KafkaActivity } from "@/types/driver";
+import { DRIVERS_LIVE_URL, KAFKA_ACTIVITY_URL, RECENT_ALERTS_URL, WEBSOCKET_URL } from "@/lib/backend";
 import { getDriverColor, getDriverIndex, getReadableDriverIndex } from "@/lib/driverColor";
 import type { DriverTrail } from "@/components/DriverMap";
 
@@ -33,6 +33,8 @@ export function DashboardClient() {
     const [lastUpdate, setLastUpdate] = useState<string | null>(null);
     const [sortMode, setSortMode] = useState<SortMode>("index");
     const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
+    const [kafkaActivity, setKafkaActivity] = useState<KafkaActivity | null>(null);
+    const [alerts, setAlerts] = useState<DeliveryAlert[]>([]);
 
     const sortedDrivers = useMemo(() => {
         return [...drivers].sort((a, b) => compareDriversWithSelection(a, b, sortMode, selectedDriverId));
@@ -51,26 +53,34 @@ export function DashboardClient() {
     useEffect(() => {
         const abortController = new AbortController();
 
-        async function loadInitialDrivers() {
+        async function loadInitialState() {
             try {
-                const response = await fetch(DRIVERS_LIVE_URL, {
-                    signal: abortController.signal
-                });
+                const [driversResponse, activityResponse, alertsResponse] = await Promise.all([
+                    fetch(DRIVERS_LIVE_URL, { signal: abortController.signal }),
+                    fetch(KAFKA_ACTIVITY_URL, { signal: abortController.signal }),
+                    fetch(RECENT_ALERTS_URL, { signal: abortController.signal })
+                ]);
 
-                if (!response.ok) {
-                    return;
+                if (driversResponse.ok) {
+                    const payload = (await driversResponse.json()) as DriverLiveState[];
+                    applyDriverUpdate(payload);
                 }
 
-                const payload = (await response.json()) as DriverLiveState[];
-                applyDriverUpdate(payload);
+                if (activityResponse.ok) {
+                    setKafkaActivity((await activityResponse.json()) as KafkaActivity);
+                }
+
+                if (alertsResponse.ok) {
+                    setAlerts((await alertsResponse.json()) as DeliveryAlert[]);
+                }
             } catch (error) {
                 if (!abortController.signal.aborted) {
-                    console.error("Unable to load live drivers", error);
+                    console.error("Unable to load dashboard state", error);
                 }
             }
         }
 
-        void loadInitialDrivers();
+        void loadInitialState();
 
         const client = new Client({
             webSocketFactory: () => new SockJS(WEBSOCKET_URL),
@@ -81,6 +91,14 @@ export function DashboardClient() {
                 client.subscribe("/topic/drivers/live", (message) => {
                     const payload = JSON.parse(message.body) as DriverLiveState[];
                     applyDriverUpdate(payload);
+                });
+
+                client.subscribe("/topic/kafka/activity", (message) => {
+                    setKafkaActivity(JSON.parse(message.body) as KafkaActivity);
+                });
+
+                client.subscribe("/topic/kafka/alerts", (message) => {
+                    setAlerts(JSON.parse(message.body) as DeliveryAlert[]);
                 });
             },
             onDisconnect: () => {
@@ -147,6 +165,66 @@ export function DashboardClient() {
                         ))}
                     </select>
                 </div>
+
+                <section className="kafka-panel" aria-label="Kafka activity">
+                    <div className="panel-title-row">
+                        <h2>Kafka Activity</h2>
+                        <span>{kafkaActivity ? `${kafkaActivity.gpsEventsPerSecond.toFixed(1)} GPS/s` : "waiting"}</span>
+                    </div>
+
+                    <dl className="kafka-metrics">
+                        <div>
+                            <dt>GPS produced</dt>
+                            <dd>{kafkaActivity?.gpsEventsProduced ?? 0}</dd>
+                        </div>
+                        <div>
+                            <dt>GPS consumed</dt>
+                            <dd>{kafkaActivity?.gpsEventsConsumed ?? 0}</dd>
+                        </div>
+                        <div>
+                            <dt>Assignments</dt>
+                            <dd>{kafkaActivity?.deliveryEventsProduced ?? 0}</dd>
+                        </div>
+                        <div>
+                            <dt>ETA events</dt>
+                            <dd>{kafkaActivity?.etaEventsProduced ?? 0}</dd>
+                        </div>
+                        <div>
+                            <dt>Geofence</dt>
+                            <dd>{kafkaActivity?.geofenceEventsProduced ?? 0}</dd>
+                        </div>
+                        <div>
+                            <dt>DLQ</dt>
+                            <dd className={(kafkaActivity?.deadLetterEventsProduced ?? 0) > 0 ? "danger-text" : undefined}>
+                                {kafkaActivity?.deadLetterEventsProduced ?? 0}
+                            </dd>
+                        </div>
+                    </dl>
+
+                    <div className="topic-strip" aria-label="Recently touched Kafka topics">
+                        {(kafkaActivity?.recentlyTouchedTopics ?? []).map((topic) => (
+                            <span key={topic}>{topic}</span>
+                        ))}
+                    </div>
+
+                    <div className="alert-feed" aria-label="Kafka Streams delay alerts">
+                        <div className="panel-title-row">
+                            <h3>Streams Alerts</h3>
+                            <span>{alerts.length}</span>
+                        </div>
+                        {alerts.length === 0 ? (
+                            <p className="empty-feed">No aggregated delay alert yet</p>
+                        ) : (
+                            alerts.slice(0, 4).map((alert) => (
+                                <article key={alert.eventId} className={`alert-item ${alert.severity.toLowerCase()}`}>
+                                    <strong>{alert.severity} {alert.alertType}</strong>
+                                    <span>{alert.driverId ?? "all drivers"}</span>
+                                    <p>{alert.message}</p>
+                                </article>
+                            ))
+                        )}
+                    </div>
+                </section>
 
                 <section className="driver-list">
                     {sortedDrivers.map((driver) => (

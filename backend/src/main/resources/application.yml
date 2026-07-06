@@ -27,6 +27,12 @@ spring:
         spring.json.trusted.packages: com.github.zenkolespadon.delivery.*
         spring.json.value.default.type: com.github.zenkolespadon.delivery.event.GpsEvent
 
+    streams:
+      application-id: delivery-delay-alert-stream
+      properties:
+        statestore.cache.max.bytes: 0
+        commit.interval.ms: 1000
+
   data:
     redis:
       host: localhost

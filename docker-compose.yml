@@ -1,7 +1,6 @@
 services:
   kafka:
     image: confluentinc/cp-kafka:7.7.1
-    container_name: delivery-kafka
     ports:
       - "9092:9092"
     environment:
@@ -30,7 +29,6 @@ services:
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: delivery-kafka-ui
     ports:
       - "8081:8080"
     environment:
@@ -42,7 +40,6 @@ services:
 
   postgres:
     image: postgis/postgis:16-3.4
-    container_name: delivery-postgres
     ports:
       - "5433:5432"
     environment:
@@ -59,7 +56,6 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    container_name: delivery-redis
     ports:
       - "6379:6379"
     command: ["redis-server", "--appendonly", "yes"]
@@ -84,10 +80,23 @@ services:
           exit 0
         fi
         echo "Downloading Toulouse region OSM extract..."
-        curl --fail --location --retry 5 --retry-delay 3 --connect-timeout 30 \
-          https://download.geofabrik.de/europe/france/midi-pyrenees-latest.osm.pbf \
-          --output /data/toulouse.osm.pbf.part
-        mv /data/toulouse.osm.pbf.part /data/toulouse.osm.pbf
+        for attempt in 1 2 3 4 5 6; do
+          echo "Download attempt $$attempt/6 (resuming partial file if present)..."
+          if curl --fail --location --silent --show-error --continue-at - \
+            --connect-timeout 30 --speed-time 60 --speed-limit 1024 \
+            https://download.geofabrik.de/europe/france/midi-pyrenees-latest.osm.pbf \
+            --output /data/toulouse.osm.pbf.part; then
+            mv /data/toulouse.osm.pbf.part /data/toulouse.osm.pbf
+            echo "OSM extract download completed."
+            exit 0
+          fi
+          if [ "$$attempt" -lt 6 ]; then
+            echo "Download interrupted. Retrying in 5 seconds; partial data is retained."
+            sleep 5
+          fi
+        done
+        echo "OSM download failed after 6 attempts. Partial data is retained; rerun docker compose up -d to resume." >&2
+        exit 1
 
   osrm-init:
     build:
@@ -101,7 +110,6 @@ services:
 
   osrm:
     image: osrm/osrm-backend:latest
-    container_name: delivery-osrm
     ports:
       - "5000:5000"
     volumes:
@@ -122,7 +130,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: delivery-backend
     ports:
       - "8080:8080"
     environment:
@@ -143,6 +150,12 @@ services:
         condition: service_healthy
       osrm:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /actuator/health HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3; read -r -t 4 status <&3; [[ $$status == *' 200 '* ]]"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 60s
 
   frontend:
     build:
@@ -150,13 +163,13 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_BACKEND_URL: http://localhost:8080
-    container_name: delivery-frontend
     ports:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_BACKEND_URL: http://localhost:8080
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres-data:

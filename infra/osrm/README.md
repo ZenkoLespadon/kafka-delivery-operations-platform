@@ -1,10 +1,12 @@
 # OSRM data
 
-The default Compose stack automatically downloads and prepares routing data in the `osrm-data` Docker volume. Run `docker compose up -d --build`; no manual setup is required.
+The default Compose stack automatically downloads and prepares routing data in the `osrm-data` Docker volume. Run `docker compose up -d`; no manual setup is required.
 
 `osrm-download` downloads the extract to a temporary file before renaming it. `osrm-init` runs extraction, partitioning and customization with two processing threads and writes a completion marker only after success. `osrm` mounts the result read-only, and the backend waits for its health check.
 
 Follow progress with `docker compose logs -f osrm-download osrm-init osrm`. The first preparation may take several minutes. Subsequent starts reuse it. `docker compose down` retains data; `docker compose down -v` deletes it.
+
+Interrupted downloads are retried up to six times, resuming the partial file when supported by the server. If all attempts fail, the partial file remains in the volume so the next `docker compose up -d` can resume it.
 
 The following optional scripts prepare host files for manual setups, independently of the default Compose volume:
 

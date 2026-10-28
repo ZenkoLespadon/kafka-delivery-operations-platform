@@ -75,7 +75,7 @@ app:
   routing:
     osrm-enabled: true
     osrm-base-url: http://localhost:5000
-    request-timeout-ms: 1500
+    request-timeout-ms: 5000
 
   websocket:
     drivers-live-broadcast-interval-ms: 2000

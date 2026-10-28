@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Locale;
 
 @Component
 public class OsrmRoutePlanner {
@@ -35,8 +36,23 @@ public class OsrmRoutePlanner {
             return Optional.empty();
         }
 
-        String url = "%s/route/v1/driving/%f,%f;%f,%f?overview=full&geometries=geojson&steps=false"
-                .formatted(properties.osrmBaseUrl(), startLng, startLat, endLng, endLat);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            Optional<List<GeoPoint>> route = requestRoute(startLat, startLng, endLat, endLng);
+            if (route.isPresent()) {
+                return route;
+            }
+            if (Thread.currentThread().isInterrupted()) {
+                break;
+            }
+        }
+        throw new IllegalStateException("OSRM could not calculate a road route. Check OSRM health and routing data at "
+                + properties.osrmBaseUrl() + ". Artificial routes are disabled while OSRM is enabled.");
+    }
+
+    private Optional<List<GeoPoint>> requestRoute(double startLat, double startLng, double endLat, double endLng) {
+        String url = String.format(Locale.ROOT,
+                "%s/route/v1/driving/%f,%f;%f,%f?overview=full&geometries=geojson&steps=false",
+                properties.osrmBaseUrl(), startLng, startLat, endLng, endLat);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))

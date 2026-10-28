@@ -71,15 +71,52 @@ services:
       timeout: 5s
       retries: 10
 
+  osrm-download:
+    image: curlimages/curl:8.12.1
+    user: "0:0"
+    volumes:
+      - osrm-data:/data
+    entrypoint: ["sh", "-ec"]
+    command:
+      - |
+        if [ -s /data/toulouse.osm.pbf ]; then
+          echo "OSM extract already downloaded."
+          exit 0
+        fi
+        echo "Downloading Toulouse region OSM extract..."
+        curl --fail --location --retry 5 --retry-delay 3 --connect-timeout 30 \
+          https://download.geofabrik.de/europe/france/midi-pyrenees-latest.osm.pbf \
+          --output /data/toulouse.osm.pbf.part
+        mv /data/toulouse.osm.pbf.part /data/toulouse.osm.pbf
+
+  osrm-init:
+    build:
+      context: ./infra/osrm
+      dockerfile: Dockerfile.init
+    volumes:
+      - osrm-data:/data
+    depends_on:
+      osrm-download:
+        condition: service_completed_successfully
+
   osrm:
     image: osrm/osrm-backend:latest
     container_name: delivery-osrm
     ports:
       - "5000:5000"
     volumes:
-      - ./infra/osrm/data:/data
+      - osrm-data:/data:ro
+    depends_on:
+      osrm-init:
+        condition: service_completed_successfully
     command: ["osrm-routed", "--algorithm", "mld", "/data/toulouse.osrm"]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/5000; printf 'GET /route/v1/driving/1.4440,43.6045;1.4700,43.6100?overview=false HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3; read -r -t 4 status <&3; [[ $$status == *' 200 '* ]]"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
 
   backend:
     build:
@@ -105,7 +142,7 @@ services:
       redis:
         condition: service_healthy
       osrm:
-        condition: service_started
+        condition: service_healthy
 
   frontend:
     build:
@@ -124,3 +161,4 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  osrm-data:

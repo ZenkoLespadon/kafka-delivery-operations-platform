@@ -1,0 +1,4 @@
+FROM osrm/osrm-backend:latest
+COPY init.sh /usr/local/bin/init-osrm.sh
+RUN sed -i 's/\r$//' /usr/local/bin/init-osrm.sh
+ENTRYPOINT ["bash", "/usr/local/bin/init-osrm.sh"]

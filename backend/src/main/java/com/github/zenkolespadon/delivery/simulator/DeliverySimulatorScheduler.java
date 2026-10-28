@@ -429,7 +429,8 @@ public class DeliverySimulatorScheduler {
             return;
         }
 
-        assignDelivery(driver, queue.poll());
+        assignDelivery(driver, queue.peek());
+        queue.remove();
     }
 
     private int queuedParcelCount() {

@@ -5,11 +5,11 @@ ARG NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
 ENV NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
 
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
 COPY . .
 RUN mkdir -p public
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
